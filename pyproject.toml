@@ -1,0 +1,13 @@
+[project]
+name = "magma-operator"
+version = "0.1.0"
+description = "Kubernetes operator for Magma Orc8r/NMS and AGW"
+requires-python = ">=3.11"
+dependencies = [
+  "kopf==1.37.4",
+  "kubernetes==30.1.0",
+  "PyYAML==6.0.2",
+]
+
+[tool.ruff]
+line-length = 120
