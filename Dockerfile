@@ -1,19 +1,36 @@
-FROM python:3.12-slim
+# Build the manager binary
+FROM docker.io/library/golang:1.26.4-bookworm AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
-ARG HELM_VERSION=3.15.4
+WORKDIR /workspace
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+# cache deps before building and copying source so that we don't need to re-download as much
+# and so that source changes don't invalidate our downloaded layer
+RUN go mod download
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git tar gzip \
-    && curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
-      | tar -xz -C /tmp \
-    && mv /tmp/linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf /var/lib/apt/lists/* /tmp/linux-amd64
+# Copy the Go source (relies on .dockerignore to filter)
+COPY . .
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Build
+# the GOARCH has no default value to allow the binary to be built according to the host where the command
+# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
+# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
+# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 
-COPY magma_operator ./magma_operator
+FROM docker.io/library/alpine:3.20.3
+ARG HELM_VERSION=v3.17.3
+RUN apk add --no-cache ca-certificates curl git tar && \
+    curl -fsSLo /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" && \
+    tar -xzf /tmp/helm.tar.gz -C /tmp && \
+    mv /tmp/linux-amd64/helm /usr/local/bin/helm && \
+    rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+WORKDIR /
+COPY --from=builder /workspace/manager .
+RUN addgroup -S magma-operator && adduser -S magma-operator -G magma-operator
+USER magma-operator
 
-USER 65532:65532
-ENTRYPOINT ["kopf", "run", "-m", "magma_operator.main", "--standalone"]
+ENTRYPOINT ["/manager"]

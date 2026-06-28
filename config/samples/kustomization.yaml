@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- magma_v1alpha1_magmaorc8r.yaml
+- magma_v1alpha1_magmaagw.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

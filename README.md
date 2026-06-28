@@ -1,94 +1,123 @@
 # Magma Operator
 
-Kubernetes operator for managing Magma Orc8r/NMS and Access Gateway (AGW)
-lifecycles.
+Kubebuilder operator for managing the Magma upstream Orc8r/NMS and AGW Helm charts from `infinitydon/telco-helm-charts`.
 
-This repo is intentionally separate from `telco-helm-charts`. The Helm charts
-remain the packaging source for static Kubernetes resources; this operator owns
-the lifecycle logic that was brittle in plain Helm:
+The operator reconciles:
 
-- Orc8r/NMS install, upgrade, status, and URL discovery.
-- AGW install, scheduling, node preparation, and status.
-- Certificate reuse and admin operator registration.
-- NMS-first provisioning flow.
-- Idempotent reconciliation after node or pod restarts.
+- `MagmaOrc8r`: deploys Orc8r, NMS/MagmaLTE, PostgreSQL, bootstrap/admin jobs, and generated secrets through `magma-fullstack-upstream`.
+- `MagmaAGW`: deploys containerized AGW, idempotent node preparation, Multus/UERANSIM simulator resources, and AGW node anti-affinity through `magma-agw-upstream`.
 
-## Custom Resources
+The current controller intentionally shells out to pinned Helm v3 inside the manager image. The manager image includes `helm`, `git`, and a writable `/tmp` cache for chart clones.
 
-### `MagmaOrc8r`
+## Image
 
-Installs and monitors the upstream Magma Orc8r/NMS stack.
-
-```yaml
-apiVersion: magma.infra.don/v1alpha1
-kind: MagmaOrc8r
-metadata:
-  name: core
-  namespace: magma-system
-spec:
-  chart:
-    repo: https://github.com/infinitydon/telco-helm-charts.git
-    path: magma-fullstack-upstream
-    version: main
-    releaseName: magma-fullstack
-  domainName: magma.local
-  nms:
-    serviceType: NodePort
-    admin:
-      organization: magma-test
-      username: admin
-      passwordSecretRef:
-        name: magma-nms-admin
-        key: password
-  waitTimeoutSeconds: 3600
-```
-
-### `MagmaAGW`
-
-Installs and monitors a Magma AGW instance and links it to an Orc8r stack.
-
-```yaml
-apiVersion: magma.infra.don/v1alpha1
-kind: MagmaAGW
-metadata:
-  name: agw-01
-  namespace: magma-agw
-spec:
-  chart:
-    repo: https://github.com/infinitydon/telco-helm-charts.git
-    path: magma-agw-upstream
-    version: main
-    releaseName: agwc
-  orc8rRef:
-    name: core
-    namespace: magma-system
-  agwNodeSelector:
-    magma.infra.don/agw: "true"
-  requireDedicatedNode: true
-  ueSimulator:
-    enabled: false
-```
-
-## Development
-
-The operator is implemented with Python, Kopf, and the Kubernetes Python
-client. It shells out to Helm for chart operations because the existing Helm
-charts remain the source of deployable manifests.
+Default image:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-kopf run -m magma_operator.main --verbose
+ghcr.io/infinitydon/magma-operator:v0.1.0
+```
+
+No default container image uses the `latest` tag.
+
+Build without Docker:
+
+```bash
+make build
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.0
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.0
 ```
 
 ## Install
 
 ```bash
-kubectl apply -f config/crd
-kubectl apply -f config/rbac.yaml
-kubectl apply -f config/deployment.yaml
+kubectl apply -k config/default
 ```
 
-The deployment image is a placeholder until CI builds and publishes it.
+The default manager deployment runs in `magma-operator-system`.
 
+## Node Labels
+
+Label only nodes that may host AGW workloads:
+
+```bash
+kubectl label node ebpf-bng-node-02 magma.io/agw-node=true --overwrite
+```
+
+Label a separate worker node for UERANSIM:
+
+```bash
+kubectl label node ebpf-bng-node-01 magma.io/ueransim-node=true --overwrite
+```
+
+Do not schedule UERANSIM on the same worker node as AGW. The AGW chart also enables pod anti-affinity so multiple AGW releases are pushed to separate nodes when capacity is available.
+
+## Orc8r/NMS
+
+Create the namespace and Orc8r CR:
+
+```bash
+kubectl create ns magma --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f config/samples/magma_v1alpha1_magmaorc8r.yaml
+```
+
+The sample exposes MagmaLTE/NMS through NodePort `31316`:
+
+```bash
+http://<node-ip>:31316/user/login
+```
+
+Default sample login:
+
+```text
+admin / admin
+```
+
+For production, override `spec.nmsAdminPassword` and manage certificate rotation deliberately. The Helm chart reuses existing generated secrets by default to avoid accidental cert replacement during upgrades.
+
+## AGW And 5G Simulator
+
+Create the namespace and AGW CR:
+
+```bash
+kubectl create ns magma-agw --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f config/samples/magma_v1alpha1_magmaagw.yaml
+```
+
+The sample uses node-02 for AGW and the tested node-02 interfaces:
+
+```yaml
+s1Interface: enp8s19
+sgiInterface: enp8s20
+agwNodeSelector:
+  magma.io/agw-node: "true"
+  kubernetes.io/hostname: ebpf-bng-node-02
+```
+
+UERANSIM is enabled in the sample and selected by:
+
+```yaml
+ueransimNodeSelector:
+  magma.io/ueransim-node: "true"
+```
+
+The AGW chart defaults to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the chart values through `spec.values`, for example:
+
+```yaml
+values:
+  simulator.multus.type: host-device
+  simulator.multus.n2.master: enp8s21
+  simulator.multus.n3.master: enp8s22
+```
+
+## Status
+
+Check reconciliation:
+
+```bash
+kubectl get magmaorc8r -n magma -o wide
+kubectl get magmaagw -n magma-agw -o wide
+kubectl describe magmaorc8r -n magma magma-orc8r
+kubectl describe magmaagw -n magma-agw agwc
+```
+
+The operator writes a `Ready` condition and release details into status. Helm errors are reflected as `Ready=False` with the Helm output in the condition message.

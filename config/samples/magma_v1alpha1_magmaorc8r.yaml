@@ -1,0 +1,18 @@
+apiVersion: magma.infra.don/v1alpha1
+kind: MagmaOrc8r
+metadata:
+  labels:
+    app.kubernetes.io/name: magma-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: magma-orc8r
+  namespace: magma
+spec:
+  releaseName: magma-fullstack
+  chartRepository: https://github.com/infinitydon/telco-helm-charts.git
+  chartRevision: main
+  chartPath: magma-fullstack-upstream
+  domainName: magma.local
+  controllerHostname: controller.magma.local
+  nmsNodePort: 31316
+  nmsAdminEmail: admin
+  nmsAdminPassword: admin
