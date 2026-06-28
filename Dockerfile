@@ -30,7 +30,7 @@ RUN apk add --no-cache ca-certificates curl git tar && \
     rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
 WORKDIR /
 COPY --from=builder /workspace/manager .
-RUN addgroup -S magma-operator && adduser -S magma-operator -G magma-operator
-USER magma-operator
+RUN addgroup -S -g 65532 magma-operator && adduser -S -D -H -u 65532 -G magma-operator magma-operator
+USER 65532:65532
 
 ENTRYPOINT ["/manager"]

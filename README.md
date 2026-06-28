@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.0
+ghcr.io/infinitydon/magma-operator:v0.1.1
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.0
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.0
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.1
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.1
 ```
 
 ## Install

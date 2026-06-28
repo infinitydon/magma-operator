@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/infinitydon/magma-operator:v0.1.0
+IMG ?= ghcr.io/infinitydon/magma-operator:v0.1.1
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
