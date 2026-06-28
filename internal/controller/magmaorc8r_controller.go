@@ -86,7 +86,7 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	setValue(values, "nmsAdmin.email", orc8r.Spec.NMSAdminEmail)
 	setValue(values, "nmsAdmin.password", orc8r.Spec.NMSAdminPassword)
 	if orc8r.Spec.NMSNodePort != nil {
-		values["orc8r.nms.magmalte.service.nodePort"] = fmt.Sprint(*orc8r.Spec.NMSNodePort)
+		values["orc8r.nms.magmalte.service.http.nodePort"] = fmt.Sprint(*orc8r.Spec.NMSNodePort)
 	}
 	for key, value := range orc8r.Spec.Values {
 		values[key] = value

@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.1
+ghcr.io/infinitydon/magma-operator:v0.1.5
 ```
 
 No default container image uses the `latest` tag.
@@ -23,11 +23,24 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.1
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.1
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.5
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.5
 ```
 
 ## Install
+
+If the GHCR package is private, create an image pull secret before or immediately after installing the manifests:
+
+```bash
+kubectl -n magma-operator-system create secret docker-registry ghcr-pull-secret \
+  --docker-server=ghcr.io \
+  --docker-username=<github-user> \
+  --docker-password=<github-token>
+
+kubectl -n magma-operator-system patch serviceaccount magma-operator-controller-manager \
+  --type=merge \
+  --patch '{"imagePullSecrets":[{"name":"ghcr-pull-secret"}]}'
+```
 
 ```bash
 kubectl apply -k config/default

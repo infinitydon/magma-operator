@@ -48,7 +48,7 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult,
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
 
-	repoDir := chartRepoDir(release.Repo, release.Revision)
+	repoDir := chartRepoDir(release)
 	if err := syncChartRepo(runCtx, release.Repo, release.Revision, repoDir); err != nil {
 		return helmResult{}, err
 	}
@@ -63,7 +63,7 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult,
 	}
 	for key, value := range release.Values {
 		flag := "--set-string"
-		if value == "true" || value == "false" || strings.HasSuffix(key, "nodePort") {
+		if !strings.Contains(key, "nodeSelector") && (value == "true" || value == "false" || strings.HasSuffix(key, "nodePort")) {
 			flag = "--set"
 		}
 		args = append(args, flag, fmt.Sprintf("%s=%s", key, value))
@@ -99,8 +99,8 @@ func syncChartRepo(ctx context.Context, repo, revision, dir string) error {
 	return nil
 }
 
-func chartRepoDir(repo, revision string) string {
-	sum := sha256.Sum256([]byte(repo + "@" + revision))
+func chartRepoDir(release helmRelease) string {
+	sum := sha256.Sum256([]byte(release.Repo + "@" + release.Revision + ":" + release.ChartPath + ":" + release.Namespace + ":" + release.ReleaseName))
 	return filepath.Join(os.TempDir(), "magma-operator-charts", hex.EncodeToString(sum[:])[:16])
 }
 

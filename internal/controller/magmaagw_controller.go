@@ -74,6 +74,7 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	values := map[string]string{
+		"namespace":                              req.Namespace,
 		"agwAntiAffinity.enabled":                "true",
 		"simulator.enabled":                      "false",
 		"simulator.antiAffinity.separateFromAgw": "true",
