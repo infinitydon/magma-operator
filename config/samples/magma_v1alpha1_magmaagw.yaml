@@ -20,3 +20,5 @@ spec:
   enableUERANSIM: true
   ueransimNodeSelector:
     magma.io/ueransim-node: "true"
+  values:
+    simulator.subscriber.provision: "true"

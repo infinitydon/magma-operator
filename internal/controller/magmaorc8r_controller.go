@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,8 +106,39 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Error(err, "failed to reconcile Magma Orc8r release")
 		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "HelmReconcileFailed", err.Error())
 	}
+	if orc8r.Spec.NMSNodePort != nil {
+		if err := r.patchMagmalteForHTTPNodePort(ctx, req.Namespace); err != nil {
+			log.Error(err, "failed to patch MagmaLTE HTTP NodePort mode")
+			return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "MagmaltePatchFailed", err.Error())
+		}
+	}
 
 	return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionTrue, "HelmReleaseReady", "Magma Orc8r Helm release is ready")
+}
+
+func (r *MagmaOrc8rReconciler) patchMagmalteForHTTPNodePort(ctx context.Context, namespace string) error {
+	var deploy appsv1.Deployment
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "nms-magmalte"}, &deploy); err != nil {
+		return err
+	}
+	if len(deploy.Spec.Template.Spec.Containers) == 0 {
+		return nil
+	}
+	container := &deploy.Spec.Template.Spec.Containers[0]
+	container.Command = []string{"node"}
+	container.Args = []string{"-r", "./babelRegister.js", "scripts/server"}
+	setEnv(container, "NODE_ENV", "development")
+	return r.Update(ctx, &deploy)
+}
+
+func setEnv(container *corev1.Container, name, value string) {
+	for i := range container.Env {
+		if container.Env[i].Name == name {
+			container.Env[i].Value = value
+			return
+		}
+	}
+	container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
 }
 
 func (r *MagmaOrc8rReconciler) updateOrc8rStatus(ctx context.Context, orc8r *magmav1alpha1.MagmaOrc8r, releaseName string, status metav1.ConditionStatus, reason, message string) (ctrl.Result, error) {
