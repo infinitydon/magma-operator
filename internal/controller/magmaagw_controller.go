@@ -117,7 +117,10 @@ func (r *MagmaAGWReconciler) updateAGWStatus(ctx context.Context, agw *magmav1al
 		Message:            conditionMessage(message),
 		ObservedGeneration: agw.Generation,
 	})
-	if err := r.Status().Update(ctx, agw); err != nil && !apierrors.IsConflict(err) {
+	if err := r.Status().Update(ctx, agw); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	if status == metav1.ConditionTrue {

@@ -159,7 +159,10 @@ func (r *MagmaOrc8rReconciler) updateOrc8rStatus(ctx context.Context, orc8r *mag
 		Message:            conditionMessage(message),
 		ObservedGeneration: orc8r.Generation,
 	})
-	if err := r.Status().Update(ctx, orc8r); err != nil && !apierrors.IsConflict(err) {
+	if err := r.Status().Update(ctx, orc8r); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	if status == metav1.ConditionTrue {
