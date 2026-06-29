@@ -104,7 +104,7 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if len(agwNodeSelector) == 0 {
 			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "AGWNodeSelectorRequired", "datapath gating requires spec.agwNodeSelector or spec.agwNodeLabelSelector")
 		}
-		ready, err := r.agwDatapathNodesReady(ctx, agwNodeSelector, agw.Spec.Datapath)
+		ready, err := r.agwDatapathNodesReady(ctx, req.Namespace, agwNodeSelector, agw.Spec.Datapath)
 		if err != nil {
 			log.Error(err, "failed to evaluate AGW datapath node readiness")
 			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "DatapathReadinessCheckFailed", err.Error())
@@ -213,18 +213,34 @@ func (r *MagmaAGWReconciler) reconcileAGWDatapathLabels(ctx context.Context, nam
 	var daemonSet appsv1.DaemonSet
 	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "agw-node-prep"}, &daemonSet); err != nil {
 		if apierrors.IsNotFound(err) {
+			if err := r.removeAGWDatapathLabels(ctx, nodes, datapath); err != nil {
+				return false, "", err
+			}
 			return false, "waiting for agw-node-prep DaemonSet to be created", nil
 		}
 		return false, "", err
 	}
 	if daemonSet.Status.DesiredNumberScheduled == 0 {
+		if err := r.removeAGWDatapathLabels(ctx, nodes, datapath); err != nil {
+			return false, "", err
+		}
 		return false, "agw-node-prep DaemonSet has no scheduled pods", nil
 	}
 	if daemonSet.Status.NumberReady < daemonSet.Status.DesiredNumberScheduled {
+		if err := r.removeAGWDatapathLabels(ctx, nodes, datapath); err != nil {
+			return false, "", err
+		}
 		message := fmt.Sprintf("waiting for agw-node-prep DaemonSet readiness: %d/%d ready", daemonSet.Status.NumberReady, daemonSet.Status.DesiredNumberScheduled)
 		return false, message, nil
 	}
 
+	if err := r.labelAGWDatapathNodes(ctx, nodes, datapath); err != nil {
+		return false, "", err
+	}
+	return true, "", nil
+}
+
+func (r *MagmaAGWReconciler) labelAGWDatapathNodes(ctx context.Context, nodes *corev1.NodeList, datapath magmav1alpha1.MagmaAGWDatapathSpec) error {
 	key := datapathReadyLabelKey(datapath)
 	value := datapathReadyLabelValue(datapath)
 	for i := range nodes.Items {
@@ -238,13 +254,32 @@ func (r *MagmaAGWReconciler) reconcileAGWDatapathLabels(ctx context.Context, nam
 		patch := client.MergeFrom(node.DeepCopy())
 		node.Labels[key] = value
 		if err := r.Patch(ctx, node, patch); err != nil {
-			return false, "", err
+			return err
 		}
 	}
-	return true, "", nil
+	return nil
 }
 
-func (r *MagmaAGWReconciler) agwDatapathNodesReady(ctx context.Context, selector map[string]string, datapath magmav1alpha1.MagmaAGWDatapathSpec) (bool, error) {
+func (r *MagmaAGWReconciler) removeAGWDatapathLabels(ctx context.Context, nodes *corev1.NodeList, datapath magmav1alpha1.MagmaAGWDatapathSpec) error {
+	key := datapathReadyLabelKey(datapath)
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		if node.Labels == nil {
+			continue
+		}
+		if _, ok := node.Labels[key]; !ok {
+			continue
+		}
+		patch := client.MergeFrom(node.DeepCopy())
+		delete(node.Labels, key)
+		if err := r.Patch(ctx, node, patch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *MagmaAGWReconciler) agwDatapathNodesReady(ctx context.Context, namespace string, selector map[string]string, datapath magmav1alpha1.MagmaAGWDatapathSpec) (bool, error) {
 	nodes, err := r.selectedAGWNodes(ctx, selector)
 	if err != nil {
 		return false, err
@@ -259,6 +294,21 @@ func (r *MagmaAGWReconciler) agwDatapathNodesReady(ctx context.Context, selector
 			return false, nil
 		}
 	}
+
+	var daemonSet appsv1.DaemonSet
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "agw-node-prep"}, &daemonSet); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if daemonSet.Status.DesiredNumberScheduled == 0 {
+		return false, nil
+	}
+	if daemonSet.Status.NumberReady < daemonSet.Status.DesiredNumberScheduled {
+		return false, nil
+	}
+
 	return true, nil
 }
 
