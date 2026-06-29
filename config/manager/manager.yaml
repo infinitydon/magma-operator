@@ -63,7 +63,7 @@ spec:
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-        image: ghcr.io/infinitydon/magma-operator:v0.1.8
+        image: controller:v0.1.8
         name: manager
         ports:
         - containerPort: 8081
