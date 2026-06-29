@@ -75,24 +75,22 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	values := map[string]string{
 		"namespace":                              req.Namespace,
-		"agwAntiAffinity.enabled":                "true",
-		"simulator.enabled":                      "false",
-		"simulator.antiAffinity.separateFromAgw": "true",
+		"agwAntiAffinity.enabled":                stringTrue,
+		"simulator.enabled":                      stringFalse,
+		"simulator.antiAffinity.separateFromAgw": stringTrue,
 	}
 	setValue(values, "config.gwChallenge", agw.Spec.AccessGatewayID)
 	setValue(values, "nodePrep.interfaces.s1.parent", agw.Spec.S1Interface)
 	setValue(values, "nodePrep.interfaces.nat.parent", agw.Spec.SGiInterface)
 	if agw.Spec.EnableUERANSIM {
-		values["simulator.enabled"] = "true"
+		values["simulator.enabled"] = stringTrue
 	}
 	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeSelector)
 	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeLabelSelector)
 	setSelectorValues(values, "simulator.nodeSelector", agw.Spec.UERANSIMNodeSelector)
-	for key, value := range agw.Spec.Values {
-		values[key] = value
-	}
+	mergeValues(values, agw.Spec.Values)
 
-	_, err := reconcileHelmRelease(ctx, helmRelease{
+	err := reconcileHelmRelease(ctx, helmRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
 		Repo:        agw.Spec.ChartRepository,

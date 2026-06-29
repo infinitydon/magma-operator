@@ -14,5 +14,13 @@ spec:
   domainName: magma.local
   controllerHostname: controller.magma.local
   nmsNodePort: 31316
+  nmsOrganization: magma-test
   nmsAdminEmail: admin
   nmsAdminPassword: admin
+  nmsCustomDomains:
+    - 192.168.88.165:31316
+    - 192.168.88.163:31316
+    - 192.168.88.224:31316
+  networkID: mpk_test
+  networkName: mpk_test
+  subscriberIMSI: IMSI001010000000001

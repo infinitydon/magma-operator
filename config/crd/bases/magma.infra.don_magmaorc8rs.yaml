@@ -49,14 +49,26 @@ spec:
                 type: string
               domainName:
                 type: string
+              networkID:
+                type: string
+              networkName:
+                type: string
               nmsAdminEmail:
                 type: string
               nmsAdminPassword:
                 type: string
+              nmsCustomDomains:
+                items:
+                  type: string
+                type: array
               nmsNodePort:
                 format: int32
                 type: integer
+              nmsOrganization:
+                type: string
               releaseName:
+                type: string
+              subscriberIMSI:
                 type: string
               values:
                 additionalProperties:

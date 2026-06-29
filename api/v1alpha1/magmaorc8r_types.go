@@ -41,9 +41,19 @@ type MagmaOrc8rSpec struct {
 	// +optional
 	NMSNodePort *int32 `json:"nmsNodePort,omitempty"`
 	// +optional
+	NMSOrganization string `json:"nmsOrganization,omitempty"`
+	// +optional
 	NMSAdminEmail string `json:"nmsAdminEmail,omitempty"`
 	// +optional
 	NMSAdminPassword string `json:"nmsAdminPassword,omitempty"`
+	// +optional
+	NMSCustomDomains []string `json:"nmsCustomDomains,omitempty"`
+	// +optional
+	NetworkID string `json:"networkID,omitempty"`
+	// +optional
+	NetworkName string `json:"networkName,omitempty"`
+	// +optional
+	SubscriberIMSI string `json:"subscriberIMSI,omitempty"`
 	// +optional
 	Values map[string]string `json:"values,omitempty"`
 }

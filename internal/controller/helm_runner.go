@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 const (
 	defaultChartRepo = "https://github.com/infinitydon/telco-helm-charts.git"
 	defaultRevision  = "main"
+	stringTrue       = "true"
+	stringFalse      = "false"
 )
 
 type helmRelease struct {
@@ -26,17 +29,12 @@ type helmRelease struct {
 	Values      map[string]string
 }
 
-type helmResult struct {
-	ChartDir string
-	Output   string
-}
-
-func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult, error) {
+func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	if release.ReleaseName == "" {
-		return helmResult{}, fmt.Errorf("release name is required")
+		return fmt.Errorf("release name is required")
 	}
 	if release.Namespace == "" {
-		return helmResult{}, fmt.Errorf("release namespace is required")
+		return fmt.Errorf("release namespace is required")
 	}
 	if release.Repo == "" {
 		release.Repo = defaultChartRepo
@@ -50,7 +48,7 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult,
 
 	repoDir := chartRepoDir(release)
 	if err := syncChartRepo(runCtx, release.Repo, release.Revision, repoDir); err != nil {
-		return helmResult{}, err
+		return err
 	}
 
 	chartDir := filepath.Join(repoDir, release.ChartPath)
@@ -63,7 +61,7 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult,
 	}
 	for key, value := range release.Values {
 		flag := "--set-string"
-		if !strings.Contains(key, "nodeSelector") && (value == "true" || value == "false" || strings.HasSuffix(key, "nodePort")) {
+		if !strings.Contains(key, "nodeSelector") && (value == stringTrue || value == stringFalse || strings.HasSuffix(key, "nodePort")) {
 			flag = "--set"
 		}
 		args = append(args, flag, fmt.Sprintf("%s=%s", key, value))
@@ -71,9 +69,9 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) (helmResult,
 
 	out, err := runCommand(runCtx, "", "helm", args...)
 	if err != nil {
-		return helmResult{ChartDir: chartDir, Output: out}, fmt.Errorf("helm upgrade failed: %w: %s", err, out)
+		return fmt.Errorf("helm upgrade failed: %w: %s", err, out)
 	}
-	return helmResult{ChartDir: chartDir, Output: out}, nil
+	return nil
 }
 
 func syncChartRepo(ctx context.Context, repo, revision, dir string) error {
@@ -122,6 +120,18 @@ func setSelectorValues(values map[string]string, prefix string, selector map[str
 	for key, value := range selector {
 		values[prefix+"."+escapeHelmKey(key)] = value
 	}
+}
+
+func setListValues(values map[string]string, prefix string, entries []string) {
+	for index, entry := range entries {
+		if entry != "" {
+			values[fmt.Sprintf("%s[%d]", prefix, index)] = entry
+		}
+	}
+}
+
+func mergeValues(values map[string]string, override map[string]string) {
+	maps.Copy(values, override)
 }
 
 func escapeHelmKey(key string) string {

@@ -78,23 +78,26 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	values := map[string]string{
 		"orc8r.nms.magmalte.service.type": "NodePort",
-		"orc8r.nms.nginx.create":          "false",
+		"orc8r.nms.nginx.create":          stringFalse,
 	}
 	setValue(values, "global.domainName", orc8r.Spec.DomainName)
 	setValue(values, "orc8r.controller.image.env.orc8r_domain_name", orc8r.Spec.DomainName)
 	setValue(values, "lte-orc8r.controller.image.env.orc8r_domain_name", orc8r.Spec.DomainName)
 	setValue(values, "orc8r.nms.controllerHostname", orc8r.Spec.ControllerHostname)
 	setValue(values, "orc8r.nginx.spec.hostname", orc8r.Spec.ControllerHostname)
+	setValue(values, "nmsAdmin.organization", orc8r.Spec.NMSOrganization)
 	setValue(values, "nmsAdmin.email", orc8r.Spec.NMSAdminEmail)
 	setValue(values, "nmsAdmin.password", orc8r.Spec.NMSAdminPassword)
+	setListValues(values, "nmsAdmin.customDomains", orc8r.Spec.NMSCustomDomains)
+	setValue(values, "provisioning.network.id", orc8r.Spec.NetworkID)
+	setValue(values, "provisioning.network.name", orc8r.Spec.NetworkName)
+	setValue(values, "provisioning.subscriber.imsi", orc8r.Spec.SubscriberIMSI)
 	if orc8r.Spec.NMSNodePort != nil {
 		values["orc8r.nms.magmalte.service.http.nodePort"] = fmt.Sprint(*orc8r.Spec.NMSNodePort)
 	}
-	for key, value := range orc8r.Spec.Values {
-		values[key] = value
-	}
+	mergeValues(values, orc8r.Spec.Values)
 
-	_, err := reconcileHelmRelease(ctx, helmRelease{
+	err := reconcileHelmRelease(ctx, helmRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
 		Repo:        orc8r.Spec.ChartRepository,

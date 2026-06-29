@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.6
+ghcr.io/infinitydon/magma-operator:v0.1.7
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.6
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.6
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.7
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.7
 ```
 
 ## Install
@@ -84,6 +84,12 @@ Default sample login:
 ```text
 admin / admin
 ```
+
+The sample also provisions the `magma-test` organization for NodePort access,
+creates LTE/5G network `mpk_test`, and creates subscriber
+`IMSI001010000000001` for the UERANSIM UE. Set `spec.nmsCustomDomains` to every
+host:port that users may use to open NMS; MagmaLTE uses this list to map the
+login request to the correct organization.
 
 For production, override `spec.nmsAdminPassword` and manage certificate rotation deliberately. The Helm chart reuses existing generated secrets by default to avoid accidental cert replacement during upgrades.
 
