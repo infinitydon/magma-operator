@@ -216,6 +216,11 @@ func (in *MagmaOrc8rSpec) DeepCopyInto(out *MagmaOrc8rSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.NMSCustomDomains != nil {
+		in, out := &in.NMSCustomDomains, &out.NMSCustomDomains
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Values != nil {
 		in, out := &in.Values, &out.Values
 		*out = make(map[string]string, len(*in))

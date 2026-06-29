@@ -43,6 +43,11 @@ type MagmaAGWSpec struct {
 	// +optional
 	EnableUERANSIM bool `json:"enableUERANSIM,omitempty"`
 	// +optional
+	// +kubebuilder:validation:Enum=AfterAGWReady;Immediate
+	UERANSIMStartPolicy string `json:"ueransimStartPolicy,omitempty"`
+	// +optional
+	UERANSIMReadyConfigMap string `json:"ueransimReadyConfigMap,omitempty"`
+	// +optional
 	UERANSIMNodeSelector map[string]string `json:"ueransimNodeSelector,omitempty"`
 	// +optional
 	S1Interface string `json:"s1Interface,omitempty"`

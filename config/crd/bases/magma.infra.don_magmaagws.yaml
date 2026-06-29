@@ -67,6 +67,13 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              ueransimReadyConfigMap:
+                type: string
+              ueransimStartPolicy:
+                enum:
+                - AfterAGWReady
+                - Immediate
+                type: string
               values:
                 additionalProperties:
                   type: string

@@ -18,8 +18,11 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,6 +32,11 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	magmav1alpha1 "github.com/infinitydon/magma-operator/api/v1alpha1"
+)
+
+const (
+	ueransimStartPolicyAfterAGWReady = "AfterAGWReady"
+	ueransimStartPolicyImmediate     = "Immediate"
 )
 
 // MagmaAGWReconciler reconciles a MagmaAGW object
@@ -82,13 +90,39 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	setValue(values, "config.gwChallenge", agw.Spec.AccessGatewayID)
 	setValue(values, "nodePrep.interfaces.s1.parent", agw.Spec.S1Interface)
 	setValue(values, "nodePrep.interfaces.nat.parent", agw.Spec.SGiInterface)
-	if agw.Spec.EnableUERANSIM {
-		values["simulator.enabled"] = stringTrue
-	}
 	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeSelector)
 	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeLabelSelector)
 	setSelectorValues(values, "simulator.nodeSelector", agw.Spec.UERANSIMNodeSelector)
 	mergeValues(values, agw.Spec.Values)
+	values["simulator.enabled"] = stringFalse
+
+	ueransimGatePending := false
+	ueransimGateName := ""
+	if agw.Spec.EnableUERANSIM {
+		startPolicy := agw.Spec.UERANSIMStartPolicy
+		if startPolicy == "" {
+			startPolicy = ueransimStartPolicyAfterAGWReady
+		}
+		switch startPolicy {
+		case ueransimStartPolicyImmediate:
+			values["simulator.enabled"] = stringTrue
+		case ueransimStartPolicyAfterAGWReady:
+			gateReady, gateName, err := r.ueransimStartGateReady(ctx, req.Namespace, &agw, releaseName)
+			if err != nil {
+				log.Error(err, "failed to read UERANSIM readiness gate")
+				return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "UERANSIMGateReadFailed", err.Error())
+			}
+			ueransimGateName = gateName
+			if gateReady {
+				values["simulator.enabled"] = stringTrue
+			} else {
+				ueransimGatePending = true
+			}
+		default:
+			message := fmt.Sprintf("unsupported ueransimStartPolicy %q; use %q or %q", startPolicy, ueransimStartPolicyAfterAGWReady, ueransimStartPolicyImmediate)
+			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "InvalidUERANSIMStartPolicy", message)
+		}
+	}
 
 	err := reconcileHelmRelease(ctx, helmRelease{
 		ReleaseName: releaseName,
@@ -103,7 +137,28 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "HelmReconcileFailed", err.Error())
 	}
 
+	if ueransimGatePending {
+		message := fmt.Sprintf("Magma AGW Helm release is ready with UERANSIM disabled. After AGW is registered with Orc8r and the UE is provisioned in NMS, create or update ConfigMap %s/%s with data ready=true.", req.Namespace, ueransimGateName)
+		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "WaitingForUERANSIMGate", message)
+	}
+
 	return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionTrue, "HelmReleaseReady", "Magma AGW Helm release is ready")
+}
+
+func (r *MagmaAGWReconciler) ueransimStartGateReady(ctx context.Context, namespace string, agw *magmav1alpha1.MagmaAGW, releaseName string) (bool, string, error) {
+	gateName := agw.Spec.UERANSIMReadyConfigMap
+	if gateName == "" {
+		gateName = releaseName + "-ueransim-ready"
+	}
+	var gate corev1.ConfigMap
+	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: gateName}, &gate)
+	if apierrors.IsNotFound(err) {
+		return false, gateName, nil
+	}
+	if err != nil {
+		return false, gateName, err
+	}
+	return strings.EqualFold(gate.Data["ready"], stringTrue), gateName, nil
 }
 
 func (r *MagmaAGWReconciler) updateAGWStatus(ctx context.Context, agw *magmav1alpha1.MagmaAGW, releaseName string, status metav1.ConditionStatus, reason, message string) (ctrl.Result, error) {

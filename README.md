@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.8
+ghcr.io/infinitydon/magma-operator:v0.1.9
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.8
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.8
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.9
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.9
 ```
 
 ## Install
@@ -115,9 +115,27 @@ agwNodeSelector:
 UERANSIM is enabled in the sample and selected by:
 
 ```yaml
+enableUERANSIM: true
+ueransimStartPolicy: AfterAGWReady
+ueransimReadyConfigMap: agwc-ueransim-ready
 ueransimNodeSelector:
   magma.io/ueransim-node: "true"
 ```
+
+With the default `AfterAGWReady` policy, the operator installs the AGW with
+UERANSIM disabled first. Start UERANSIM only after the AGW is registered and
+healthy in Orc8r/NMS and the UE subscriber has been created in NMS:
+
+```bash
+kubectl -n magma-agw create configmap agwc-ueransim-ready \
+  --from-literal=ready=true \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+This ConfigMap is an idempotent gate. Reapplying it is safe, and removing or
+setting `ready=false` before UERANSIM starts keeps the simulator disabled on
+the next reconciliation. Use `ueransimStartPolicy: Immediate` only for isolated
+simulator testing.
 
 The AGW chart defaults to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the chart values through `spec.values`, for example:
 
@@ -126,6 +144,16 @@ values:
   simulator.multus.type: host-device
   simulator.multus.n2.master: enp8s21
   simulator.multus.n3.master: enp8s22
+```
+
+Subscriber provisioning belongs in Orc8r/NMS for the full-stack deployment. The
+AGW-local `subscriberdb` seeding job is not set in the sample and should remain
+off when the AGW is managed by NMS. It is only a standalone AGW lab shortcut:
+
+```yaml
+ueransimStartPolicy: Immediate
+values:
+  simulator.subscriber.provision: "true"
 ```
 
 ## Status

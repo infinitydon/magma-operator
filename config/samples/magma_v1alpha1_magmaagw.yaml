@@ -18,7 +18,7 @@ spec:
     magma.io/agw-node: "true"
     kubernetes.io/hostname: ebpf-bng-node-02
   enableUERANSIM: true
+  ueransimStartPolicy: AfterAGWReady
+  ueransimReadyConfigMap: agwc-ueransim-ready
   ueransimNodeSelector:
     magma.io/ueransim-node: "true"
-  values:
-    simulator.subscriber.provision: "true"
