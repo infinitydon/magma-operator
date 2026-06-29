@@ -104,6 +104,7 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		Revision:    orc8r.Spec.ChartRevision,
 		ChartPath:   chartPath,
 		Values:      values,
+		Wait:        true,
 	})
 	if err != nil {
 		log.Error(err, "failed to reconcile Magma Orc8r release")

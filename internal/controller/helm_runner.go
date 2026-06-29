@@ -27,6 +27,7 @@ type helmRelease struct {
 	Revision    string
 	ChartPath   string
 	Values      map[string]string
+	Wait        bool
 }
 
 func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
@@ -56,8 +57,10 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 		"upgrade", "--install", release.ReleaseName, chartDir,
 		"--namespace", release.Namespace,
 		"--create-namespace",
-		"--wait",
 		"--timeout", "20m",
+	}
+	if release.Wait {
+		args = append(args, "--wait")
 	}
 	for key, value := range release.Values {
 		flag := "--set-string"

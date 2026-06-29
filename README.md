@@ -110,7 +110,18 @@ sgiInterface: enp8s20
 agwNodeSelector:
   magma.io/agw-node: "true"
   kubernetes.io/hostname: ebpf-bng-node-02
+datapath:
+  enabled: true
+  requireMagmaOvsKmod: true
 ```
+
+With `datapath.enabled=true`, the operator performs a two-step AGW reconcile:
+it first deploys the chart with `agw-node-prep` scheduled on the raw
+`agwNodeSelector`, while AGW workloads are gated on
+`magma.io/agw-datapath-ready=true`. Once the node-prep DaemonSet is ready, the
+operator labels the selected node and reconciles the Helm release again with
+normal readiness waiting. Set `datapath.requireMagmaOvsKmod=true` to make
+node-prep fail fast when `/usr/local/bin/ovs-kmod-upgrade.sh` is missing.
 
 UERANSIM is enabled in the sample and selected by:
 

@@ -19,13 +19,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +40,8 @@ import (
 const (
 	ueransimStartPolicyAfterAGWReady = "AfterAGWReady"
 	ueransimStartPolicyImmediate     = "Immediate"
+	defaultDatapathReadyLabelKey     = "magma.io/agw-datapath-ready"
+	defaultDatapathReadyLabelValue   = stringTrue
 )
 
 // MagmaAGWReconciler reconciles a MagmaAGW object
@@ -48,6 +53,7 @@ type MagmaAGWReconciler struct {
 // +kubebuilder:rbac:groups=magma.infra.don,resources=magmaagws,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=magma.infra.don,resources=magmaagws/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=magma.infra.don,resources=magmaagws/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups="",resources=namespaces;secrets;services;configmaps;serviceaccounts;persistentvolumeclaims;pods;pods/log,verbs=*
 // +kubebuilder:rbac:groups="apps",resources=deployments;statefulsets;daemonsets;replicasets,verbs=*
 // +kubebuilder:rbac:groups="batch",resources=jobs;cronjobs,verbs=*
@@ -90,8 +96,29 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	setValue(values, "config.gwChallenge", agw.Spec.AccessGatewayID)
 	setValue(values, "nodePrep.interfaces.s1.parent", agw.Spec.S1Interface)
 	setValue(values, "nodePrep.interfaces.nat.parent", agw.Spec.SGiInterface)
-	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeSelector)
-	setSelectorValues(values, "nodeSelector", agw.Spec.AGWNodeLabelSelector)
+
+	agwNodeSelector := mergedSelectors(agw.Spec.AGWNodeSelector, agw.Spec.AGWNodeLabelSelector)
+	datapathEnabled := datapathGateEnabled(agw.Spec.Datapath)
+	datapathReady := true
+	if datapathEnabled {
+		if len(agwNodeSelector) == 0 {
+			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "AGWNodeSelectorRequired", "datapath gating requires spec.agwNodeSelector or spec.agwNodeLabelSelector")
+		}
+		ready, err := r.agwDatapathNodesReady(ctx, agwNodeSelector, agw.Spec.Datapath)
+		if err != nil {
+			log.Error(err, "failed to evaluate AGW datapath node readiness")
+			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "DatapathReadinessCheckFailed", err.Error())
+		}
+		datapathReady = ready
+		setSelectorValues(values, "nodePrep.nodeSelector", agwNodeSelector)
+		workloadSelector := maps.Clone(agwNodeSelector)
+		workloadSelector[datapathReadyLabelKey(agw.Spec.Datapath)] = datapathReadyLabelValue(agw.Spec.Datapath)
+		setSelectorValues(values, "nodeSelector", workloadSelector)
+		values["nodePrep.requireMagmaOvsKmod"] = boolString(agw.Spec.Datapath.RequireMagmaOvsKmod)
+		setValue(values, "nodePrep.magmaOvsKmodUpgradePath", agw.Spec.Datapath.OvsKmodUpgradePath)
+	} else {
+		setSelectorValues(values, "nodeSelector", agwNodeSelector)
+	}
 	setSelectorValues(values, "simulator.nodeSelector", agw.Spec.UERANSIMNodeSelector)
 	mergeValues(values, agw.Spec.Values)
 	values["simulator.enabled"] = stringFalse
@@ -131,10 +158,23 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		Revision:    agw.Spec.ChartRevision,
 		ChartPath:   chartPath,
 		Values:      values,
+		Wait:        !datapathEnabled || datapathReady,
 	})
 	if err != nil {
 		log.Error(err, "failed to reconcile Magma AGW release")
 		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "HelmReconcileFailed", err.Error())
+	}
+
+	if datapathEnabled && !datapathReady {
+		datapathReadyNow, message, err := r.reconcileAGWDatapathLabels(ctx, req.Namespace, agwNodeSelector, agw.Spec.Datapath)
+		if err != nil {
+			log.Error(err, "failed to reconcile AGW datapath labels")
+			return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "DatapathLabelReconcileFailed", err.Error())
+		}
+		if datapathReadyNow {
+			return r.updateAGWStatusWithRequeue(ctx, &agw, releaseName, metav1.ConditionFalse, "DatapathReady", "AGW datapath node prep is ready; reconciling AGW workloads", 5*time.Second)
+		}
+		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "WaitingForDatapathReady", message)
 	}
 
 	if ueransimGatePending {
@@ -161,7 +201,81 @@ func (r *MagmaAGWReconciler) ueransimStartGateReady(ctx context.Context, namespa
 	return strings.EqualFold(gate.Data["ready"], stringTrue), gateName, nil
 }
 
+func (r *MagmaAGWReconciler) reconcileAGWDatapathLabels(ctx context.Context, namespace string, selector map[string]string, datapath magmav1alpha1.MagmaAGWDatapathSpec) (bool, string, error) {
+	nodes, err := r.selectedAGWNodes(ctx, selector)
+	if err != nil {
+		return false, "", err
+	}
+	if len(nodes.Items) == 0 {
+		return false, "no nodes match the AGW datapath selector", nil
+	}
+
+	var daemonSet appsv1.DaemonSet
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "agw-node-prep"}, &daemonSet); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, "waiting for agw-node-prep DaemonSet to be created", nil
+		}
+		return false, "", err
+	}
+	if daemonSet.Status.DesiredNumberScheduled == 0 {
+		return false, "agw-node-prep DaemonSet has no scheduled pods", nil
+	}
+	if daemonSet.Status.NumberReady < daemonSet.Status.DesiredNumberScheduled {
+		message := fmt.Sprintf("waiting for agw-node-prep DaemonSet readiness: %d/%d ready", daemonSet.Status.NumberReady, daemonSet.Status.DesiredNumberScheduled)
+		return false, message, nil
+	}
+
+	key := datapathReadyLabelKey(datapath)
+	value := datapathReadyLabelValue(datapath)
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		if node.Labels == nil {
+			node.Labels = map[string]string{}
+		}
+		if node.Labels[key] == value {
+			continue
+		}
+		patch := client.MergeFrom(node.DeepCopy())
+		node.Labels[key] = value
+		if err := r.Patch(ctx, node, patch); err != nil {
+			return false, "", err
+		}
+	}
+	return true, "", nil
+}
+
+func (r *MagmaAGWReconciler) agwDatapathNodesReady(ctx context.Context, selector map[string]string, datapath magmav1alpha1.MagmaAGWDatapathSpec) (bool, error) {
+	nodes, err := r.selectedAGWNodes(ctx, selector)
+	if err != nil {
+		return false, err
+	}
+	if len(nodes.Items) == 0 {
+		return false, nil
+	}
+	key := datapathReadyLabelKey(datapath)
+	value := datapathReadyLabelValue(datapath)
+	for _, node := range nodes.Items {
+		if node.Labels[key] != value {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (r *MagmaAGWReconciler) selectedAGWNodes(ctx context.Context, selector map[string]string) (*corev1.NodeList, error) {
+	var nodes corev1.NodeList
+	err := r.List(ctx, &nodes, &client.ListOptions{LabelSelector: labels.SelectorFromSet(selector)})
+	if err != nil {
+		return nil, err
+	}
+	return &nodes, nil
+}
+
 func (r *MagmaAGWReconciler) updateAGWStatus(ctx context.Context, agw *magmav1alpha1.MagmaAGW, releaseName string, status metav1.ConditionStatus, reason, message string) (ctrl.Result, error) {
+	return r.updateAGWStatusWithRequeue(ctx, agw, releaseName, status, reason, message, 2*time.Minute)
+}
+
+func (r *MagmaAGWReconciler) updateAGWStatusWithRequeue(ctx context.Context, agw *magmav1alpha1.MagmaAGW, releaseName string, status metav1.ConditionStatus, reason, message string, requeueAfter time.Duration) (ctrl.Result, error) {
 	agw.Status.ObservedGeneration = agw.Generation
 	agw.Status.ReleaseName = releaseName
 	agw.Status.ReleaseNamespace = agw.Namespace
@@ -181,7 +295,43 @@ func (r *MagmaAGWReconciler) updateAGWStatus(ctx context.Context, agw *magmav1al
 	if status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{RequeueAfter: 2 * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+func mergedSelectors(selectors ...map[string]string) map[string]string {
+	merged := map[string]string{}
+	for _, selector := range selectors {
+		maps.Copy(merged, selector)
+	}
+	return merged
+}
+
+func datapathGateEnabled(datapath magmav1alpha1.MagmaAGWDatapathSpec) bool {
+	if datapath.Enabled == nil {
+		return true
+	}
+	return *datapath.Enabled
+}
+
+func datapathReadyLabelKey(datapath magmav1alpha1.MagmaAGWDatapathSpec) string {
+	if datapath.ReadyLabelKey != "" {
+		return datapath.ReadyLabelKey
+	}
+	return defaultDatapathReadyLabelKey
+}
+
+func datapathReadyLabelValue(datapath magmav1alpha1.MagmaAGWDatapathSpec) string {
+	if datapath.ReadyLabelValue != "" {
+		return datapath.ReadyLabelValue
+	}
+	return defaultDatapathReadyLabelValue
+}
+
+func boolString(value bool) string {
+	if value {
+		return stringTrue
+	}
+	return stringFalse
 }
 
 // SetupWithManager sets up the controller with the Manager.

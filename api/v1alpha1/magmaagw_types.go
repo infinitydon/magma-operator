@@ -54,7 +54,23 @@ type MagmaAGWSpec struct {
 	// +optional
 	SGiInterface string `json:"sgiInterface,omitempty"`
 	// +optional
+	Datapath MagmaAGWDatapathSpec `json:"datapath,omitempty"`
+	// +optional
 	Values map[string]string `json:"values,omitempty"`
+}
+
+// MagmaAGWDatapathSpec defines AGW host datapath node-prep gating.
+type MagmaAGWDatapathSpec struct {
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+	// +optional
+	ReadyLabelKey string `json:"readyLabelKey,omitempty"`
+	// +optional
+	ReadyLabelValue string `json:"readyLabelValue,omitempty"`
+	// +optional
+	RequireMagmaOvsKmod bool `json:"requireMagmaOvsKmod,omitempty"`
+	// +optional
+	OvsKmodUpgradePath string `json:"ovsKmodUpgradePath,omitempty"`
 }
 
 // MagmaAGWStatus defines the observed state of MagmaAGW.

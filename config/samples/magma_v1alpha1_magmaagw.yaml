@@ -17,6 +17,12 @@ spec:
   agwNodeSelector:
     magma.io/agw-node: "true"
     kubernetes.io/hostname: ebpf-bng-node-02
+  datapath:
+    enabled: true
+    readyLabelKey: magma.io/agw-datapath-ready
+    readyLabelValue: "true"
+    requireMagmaOvsKmod: true
+    ovsKmodUpgradePath: /usr/local/bin/ovs-kmod-upgrade.sh
   enableUERANSIM: true
   ueransimStartPolicy: AfterAGWReady
   ueransimReadyConfigMap: agwc-ueransim-ready

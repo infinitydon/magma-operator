@@ -55,6 +55,21 @@ spec:
                 type: string
               chartRevision:
                 type: string
+              datapath:
+                description: MagmaAGWDatapathSpec defines AGW host datapath node-prep
+                  gating.
+                properties:
+                  enabled:
+                    type: boolean
+                  ovsKmodUpgradePath:
+                    type: string
+                  readyLabelKey:
+                    type: string
+                  readyLabelValue:
+                    type: string
+                  requireMagmaOvsKmod:
+                    type: boolean
+                type: object
               enableUERANSIM:
                 type: boolean
               releaseName:
