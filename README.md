@@ -167,6 +167,24 @@ values:
   simulator.subscriber.provision: "true"
 ```
 
+### Validated Simulator Image
+
+The current validated UERANSIM simulator image for the Magma 1.9 AGW chart is:
+
+```text
+ghcr.io/infinitydon/ueransim:v3.2.4-x86-64
+```
+
+The matching reference Dockerfile is stored in the Helm chart repo at
+`magma-agw-upstream/docs/Dockerfile.ueransim-v3.2.4`. It is documentation and
+rebuild reference only; the operator does not build simulator images during
+reconciliation.
+
+`ghcr.io/infinitydon/ueransim:v3.3.0-x86-64` was also tested. It pulled and ran,
+and UE registration plus PDU session establishment succeeded, but user-plane
+ICMP through `uesimtun0` failed. The operator samples should therefore continue
+to use `v3.2.4-x86-64` until that v3.3.0 datapath behavior is understood.
+
 ## Status
 
 Check reconciliation:
