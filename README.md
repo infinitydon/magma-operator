@@ -167,6 +167,21 @@ values:
   simulator.subscriber.provision: "true"
 ```
 
+For a clean AGW rebuild that deletes `agwc-claim`, persist the AGW bootstrap
+challenge key in the CR values. This value is the base64-encoded PEM private
+key from `/var/opt/magma/certs/gw_challenge.key`; the matching public key must
+be registered on the NMS gateway device record.
+
+```yaml
+values:
+  config.gwChallenge: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0t...
+```
+
+Without that value, `magmad` generates a new private challenge key on a fresh
+PVC. That is fine for a brand-new gateway registration, but an already
+registered NMS gateway will reject bootstrap because the stored public key no
+longer matches.
+
 ### Validated Simulator Image
 
 The current validated UERANSIM simulator image for the Magma 1.9 AGW chart is:

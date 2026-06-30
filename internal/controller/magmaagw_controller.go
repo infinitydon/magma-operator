@@ -93,7 +93,6 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		"simulator.enabled":                      stringFalse,
 		"simulator.antiAffinity.separateFromAgw": stringTrue,
 	}
-	setValue(values, "config.gwChallenge", agw.Spec.AccessGatewayID)
 	setValue(values, "nodePrep.interfaces.s1.parent", agw.Spec.S1Interface)
 	setValue(values, "nodePrep.interfaces.nat.parent", agw.Spec.SGiInterface)
 
