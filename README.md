@@ -180,6 +180,9 @@ The matching reference Dockerfile is stored in the Helm chart repo at
 rebuild reference only; the operator does not build simulator images during
 reconciliation.
 
+The UE ping requirements and validation procedure are captured in the Helm chart
+repo at `magma-agw-upstream/docs/ue-ping-validation.md`.
+
 `ghcr.io/infinitydon/ueransim:v3.3.0-x86-64` was also tested. It pulled and ran,
 and UE registration plus PDU session establishment succeeded, but user-plane
 ICMP through `uesimtun0` failed. The operator samples should therefore continue
