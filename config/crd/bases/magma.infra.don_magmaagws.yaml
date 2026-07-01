@@ -70,8 +70,60 @@ spec:
                   requireMagmaOvsKmod:
                     type: boolean
                 type: object
+              deletionPolicy:
+                description: MagmaAGWDeletionPolicySpec defines opt-in cleanup for
+                  durable AGW state.
+                properties:
+                  deleteIdentitySecret:
+                    type: boolean
+                  deletePVC:
+                    type: boolean
+                type: object
               enableUERANSIM:
                 type: boolean
+              gatewayRegistration:
+                description: MagmaAGWGatewayRegistrationSpec defines Orc8r/NMS gateway
+                  registration intent.
+                properties:
+                  deleteOnRemoval:
+                    type: boolean
+                  description:
+                    type: string
+                  enabled:
+                    type: boolean
+                  name:
+                    type: string
+                  tier:
+                    type: string
+                type: object
+              identity:
+                description: MagmaAGWIdentitySpec defines the operator-managed AGW
+                  bootstrap identity.
+                properties:
+                  hardwareID:
+                    type: string
+                  importSecretKey:
+                    type: string
+                  importSecretName:
+                    type: string
+                  rotationPolicy:
+                    enum:
+                    - Never
+                    - Rotate
+                    type: string
+                  secretName:
+                    type: string
+                type: object
+              networkID:
+                type: string
+              nmsAPIHost:
+                type: string
+              nmsAdminCertSecretName:
+                type: string
+              orc8rNamespace:
+                type: string
+              orc8rReleaseName:
+                type: string
               releaseName:
                 type: string
               s1Interface:
@@ -89,6 +141,27 @@ spec:
                 - AfterAGWReady
                 - Immediate
                 type: string
+              ueransimValidation:
+                description: MagmaAGWUERANSIMValidationSpec defines an optional one-shot
+                  simulator validation.
+                properties:
+                  enabled:
+                    type: boolean
+                  iperfPort:
+                    format: int32
+                    type: integer
+                  iperfServer:
+                    type: string
+                  pingHost:
+                    type: string
+                  timeoutSeconds:
+                    format: int32
+                    type: integer
+                  trigger:
+                    type: string
+                  ueDeploymentName:
+                    type: string
+                type: object
               values:
                 additionalProperties:
                   type: string
@@ -97,6 +170,8 @@ spec:
           status:
             description: status defines the observed state of MagmaAGW
             properties:
+              challengePublicKeyHash:
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -156,12 +231,22 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              gatewayRegistered:
+                type: boolean
+              hardwareID:
+                type: string
+              identitySecretName:
+                type: string
               observedGeneration:
                 format: int64
                 type: integer
+              orc8rServiceIP:
+                type: string
               releaseName:
                 type: string
               releaseNamespace:
+                type: string
+              trustBundleHash:
                 type: string
             type: object
         required:

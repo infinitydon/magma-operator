@@ -77,6 +77,22 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	return nil
 }
 
+func uninstallHelmRelease(ctx context.Context, releaseName, namespace string) error {
+	if releaseName == "" || namespace == "" {
+		return nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	out, err := runCommand(runCtx, "", "helm", "uninstall", releaseName, "--namespace", namespace, "--wait", "--timeout", "10m")
+	if err != nil {
+		if strings.Contains(out, "not found") || strings.Contains(out, "release: not found") {
+			return nil
+		}
+		return fmt.Errorf("helm uninstall failed: %w: %s", err, out)
+	}
+	return nil
+}
+
 func syncChartRepo(ctx context.Context, repo, revision, dir string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		if out, err := runCommand(ctx, dir, "git", "fetch", "--all", "--tags", "--prune"); err != nil {

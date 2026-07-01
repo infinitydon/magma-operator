@@ -29,10 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	magmav1alpha1 "github.com/infinitydon/magma-operator/api/v1alpha1"
 )
+
+const magmaOrc8rFinalizer = "magma.infra.don/magmaorc8r-finalizer"
 
 // MagmaOrc8rReconciler reconciles a MagmaOrc8r object
 type MagmaOrc8rReconciler struct {
@@ -74,6 +77,17 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	chartPath := orc8r.Spec.ChartPath
 	if chartPath == "" {
 		chartPath = "magma-fullstack-upstream"
+	}
+	if !orc8r.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.reconcileOrc8rDeletion(ctx, &orc8r, releaseName)
+	}
+	if !controllerutil.ContainsFinalizer(&orc8r, magmaOrc8rFinalizer) {
+		patch := client.MergeFrom(orc8r.DeepCopy())
+		controllerutil.AddFinalizer(&orc8r, magmaOrc8rFinalizer)
+		if err := r.Patch(ctx, &orc8r, patch); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	values := map[string]string{
@@ -118,6 +132,22 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionTrue, "HelmReleaseReady", "Magma Orc8r Helm release is ready")
+}
+
+func (r *MagmaOrc8rReconciler) reconcileOrc8rDeletion(ctx context.Context, orc8r *magmav1alpha1.MagmaOrc8r, releaseName string) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(orc8r, magmaOrc8rFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	if err := uninstallHelmRelease(ctx, releaseName, orc8r.Namespace); err != nil {
+		_, statusErr := r.updateOrc8rStatus(ctx, orc8r, releaseName, metav1.ConditionFalse, "HelmUninstallFailed", err.Error())
+		if statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	patch := client.MergeFrom(orc8r.DeepCopy())
+	controllerutil.RemoveFinalizer(orc8r, magmaOrc8rFinalizer)
+	return ctrl.Result{}, r.Patch(ctx, orc8r, patch)
 }
 
 func (r *MagmaOrc8rReconciler) patchMagmalteForHTTPNodePort(ctx context.Context, namespace string) error {

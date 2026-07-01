@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.9
+ghcr.io/infinitydon/magma-operator:v0.1.22
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.9
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.9
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.22
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.22
 ```
 
 ## Install
@@ -102,6 +102,63 @@ kubectl create ns magma-agw --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/magma_v1alpha1_magmaagw.yaml
 ```
 
+The operator manages AGW bootstrap identity and NMS gateway registration before
+it deploys the AGW workloads. `spec.identity.secretName` is the Kubernetes
+Secret that stores `gw_challenge.key`, its base64 form, the derived public key,
+the public-key hash, and the hardware ID. If the Secret does not exist, the
+operator creates it. To preserve an existing AGW identity, set
+`identity.importSecretName`/`identity.importSecretKey` or pre-create the
+`identity.secretName` Secret. `rotationPolicy: Never` is the production default.
+
+With `gatewayRegistration.enabled=true`, the operator waits for Orc8r/NMS,
+creates the default tier if needed, and registers the gateway through Magma's
+LTE gateway API so both the generic Magmad record and the cellular gateway
+record exist. This is required for subscriber sync and 5G UE registration.
+
+```yaml
+networkID: mpk_test
+orc8rNamespace: magma
+orc8rReleaseName: magma-fullstack
+nmsAPIHost: magma-fullstack-nginx-proxy
+nmsAdminCertSecretName: orc8r-secrets-certs
+identity:
+  secretName: agw-bootstrap-challenge-key
+  hardwareID: 38001016-6de3-4d3d-927c-5d448a674bfe
+  rotationPolicy: Never
+gatewayRegistration:
+  enabled: true
+  deleteOnRemoval: false
+  name: agw-node-02
+  description: Kubernetes managed AGW
+  tier: default
+deletionPolicy:
+  deletePVC: false
+  deleteIdentitySecret: false
+```
+
+The AGW controller also owns the runtime glue that should not be maintained by
+hand:
+
+- discovers the live Orc8r nginx service ClusterIP and injects it into
+  `orc8r.hostAliases.ip`;
+- copies the live Orc8r `rootCA.pem` into the AGW cert Secret and existing AGW
+  PVC when certificates are regenerated;
+- annotates AGW Deployments with the root CA hash so pods roll after trust
+  bundle changes;
+- deletes stale unschedulable `NodeAffinity` pods left behind by older
+  ReplicaSets after selector changes;
+- adds a finalizer that uninstalls the AGW Helm release and removes
+  operator-applied datapath-ready labels before the `MagmaAGW` object is
+  removed;
+- optionally removes the Orc8r/NMS gateway record, AGW PVC, and managed
+  identity Secret when the CR explicitly opts into those destructive actions.
+
+The controller preserves the managed identity Secret and AGW PVC on CR deletion
+by default. That keeps gateway identity recoverable after accidental CR removal
+or a controlled redeploy. Set `gatewayRegistration.deleteOnRemoval=true`,
+`deletionPolicy.deletePVC=true`, or `deletionPolicy.deleteIdentitySecret=true`
+only when the intended lifecycle is a full teardown.
+
 The sample uses node-02 for AGW and the tested node-02 interfaces:
 
 ```yaml
@@ -131,6 +188,13 @@ ueransimStartPolicy: AfterAGWReady
 ueransimReadyConfigMap: agwc-ueransim-ready
 ueransimNodeSelector:
   magma.io/ueransim-node: "true"
+ueransimValidation:
+  enabled: true
+  trigger: initial-validation
+  pingHost: 4.2.2.2
+  iperfServer: 192.168.88.230
+  iperfPort: 5201
+  timeoutSeconds: 240
 ```
 
 With the default `AfterAGWReady` policy, the operator installs the AGW with
@@ -147,6 +211,15 @@ This ConfigMap is an idempotent gate. Reapplying it is safe, and removing or
 setting `ready=false` before UERANSIM starts keeps the simulator disabled on
 the next reconciliation. Use `ueransimStartPolicy: Immediate` only for isolated
 simulator testing.
+
+UERANSIM is intentionally treated as an end-user simulator, not as part of AGW
+steady-state health. It can enter idle/session states that do not prove the AGW
+is broken. The operator therefore does not block `Ready=True` on UERANSIM pod
+or tunnel state. If `ueransimValidation.enabled=true`, it creates a one-shot
+validation Job named `<release>-ueransim-validation`; the Job waits for the UE
+pod's `uesimtun0`, runs ping, and optionally runs iperf3. Change
+`ueransimValidation.trigger` to run the validation again. The result is reported
+in the separate `UERANSIMValidated` condition.
 
 The AGW chart defaults to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the chart values through `spec.values`, for example:
 
@@ -167,20 +240,11 @@ values:
   simulator.subscriber.provision: "true"
 ```
 
-For a clean AGW rebuild that deletes `agwc-claim`, persist the AGW bootstrap
-challenge key in the CR values. This value is the base64-encoded PEM private
-key from `/var/opt/magma/certs/gw_challenge.key`; the matching public key must
-be registered on the NMS gateway device record.
-
-```yaml
-values:
-  config.gwChallenge: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0t...
-```
-
-Without that value, `magmad` generates a new private challenge key on a fresh
-PVC. That is fine for a brand-new gateway registration, but an already
-registered NMS gateway will reject bootstrap because the stored public key no
-longer matches.
+The legacy `values.config.gwChallenge` escape hatch is still honored as an
+import source, but the typed `identity` block should be preferred. The operator
+re-injects the managed challenge key into Helm values on every reconcile so a
+fresh `agwc-claim` PVC keeps the same gateway identity and can bootstrap against
+the existing NMS gateway record.
 
 ### Validated Simulator Image
 
@@ -214,4 +278,21 @@ kubectl describe magmaorc8r -n magma magma-orc8r
 kubectl describe magmaagw -n magma-agw agwc
 ```
 
-The operator writes a `Ready` condition and release details into status. Helm errors are reflected as `Ready=False` with the Helm output in the condition message.
+The operator writes a top-level `Ready` condition and detailed lifecycle
+conditions into status. Helm errors are reflected as `Ready=False` with the
+Helm output in the condition message. AGW conditions include:
+
+- `IdentityReady`
+- `DatapathReady`
+- `TrustBundleSynced`
+- `GatewayRegistered`
+- `UERANSIMValidated` when one-shot validation is enabled
+
+For AGW, status also includes:
+
+- `identitySecretName`
+- `hardwareID`
+- `challengePublicKeyHash`
+- `gatewayRegistered`
+- `orc8rServiceIP`
+- `trustBundleHash`

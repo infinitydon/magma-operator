@@ -11,7 +11,25 @@ spec:
   chartRepository: https://github.com/infinitydon/telco-helm-charts.git
   chartRevision: main
   chartPath: magma-agw-upstream
+  networkID: mpk_test
+  orc8rNamespace: magma
+  orc8rReleaseName: magma-fullstack
+  nmsAPIHost: magma-fullstack-nginx-proxy
+  nmsAdminCertSecretName: orc8r-secrets-certs
   accessGatewayID: agw-node-02
+  identity:
+    secretName: agw-bootstrap-challenge-key
+    hardwareID: 38001016-6de3-4d3d-927c-5d448a674bfe
+    rotationPolicy: Never
+  gatewayRegistration:
+    enabled: true
+    deleteOnRemoval: false
+    name: agw-node-02
+    description: Kubernetes managed AGW
+    tier: default
+  deletionPolicy:
+    deletePVC: false
+    deleteIdentitySecret: false
   s1Interface: enp8s19
   sgiInterface: enp8s20
   agwNodeSelector:
@@ -28,3 +46,10 @@ spec:
   ueransimReadyConfigMap: agwc-ueransim-ready
   ueransimNodeSelector:
     magma.io/ueransim-node: "true"
+  ueransimValidation:
+    enabled: true
+    trigger: initial-validation
+    pingHost: 4.2.2.2
+    iperfServer: 192.168.88.230
+    iperfPort: 5201
+    timeoutSeconds: 240
