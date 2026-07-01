@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -21,6 +22,7 @@ import (
 const (
 	ueransimValidationComponent   = "ueransim-validation"
 	ueransimValidationHash        = "magma.infra.don/ueransim-validation-hash"
+	ueransimValidationRolloutHash = "magma.infra.don/ueransim-validation-rollout-hash"
 	ueransimValidationServiceAcct = "magma-operator-ueransim-validation"
 )
 
@@ -36,18 +38,11 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidation(ctx context.Context, ag
 	if err := r.reconcileUERANSIMValidationRBAC(ctx, agw.Namespace); err != nil {
 		return false, "UERANSIMValidationRBACFailed", err.Error(), err
 	}
-	uePod, err := r.ueransimUEPod(ctx, agw.Namespace, releaseName)
-	if err != nil {
-		return false, "UERANSIMValidationPodReadFailed", err.Error(), err
-	}
-	if uePod == "" {
-		return false, "WaitingForUERANSIMUEPod", "waiting for a running UERANSIM UE pod before one-shot validation", nil
-	}
 
 	jobName := releaseName + "-ueransim-validation"
 	desiredHash := ueransimValidationSpecHash(agw, releaseName)
 	var existing batchv1.Job
-	err = r.Get(ctx, types.NamespacedName{Namespace: agw.Namespace, Name: jobName}, &existing)
+	err := r.Get(ctx, types.NamespacedName{Namespace: agw.Namespace, Name: jobName}, &existing)
 	if err == nil {
 		if existing.Annotations[ueransimValidationHash] != desiredHash {
 			if err := r.Delete(ctx, &existing, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
@@ -67,6 +62,18 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidation(ctx context.Context, ag
 		return false, "UERANSIMValidationJobReadFailed", err.Error(), err
 	}
 
+	rolloutReady, reason, message, err := r.reconcileUERANSIMValidationRollout(ctx, agw.Namespace, releaseName, desiredHash)
+	if err != nil || !rolloutReady {
+		return false, reason, message, err
+	}
+	uePod, err := r.ueransimUEPod(ctx, agw.Namespace, releaseName)
+	if err != nil {
+		return false, "UERANSIMValidationPodReadFailed", err.Error(), err
+	}
+	if uePod == "" {
+		return false, "WaitingForUERANSIMUEPod", "waiting for a running UERANSIM UE pod before one-shot validation", nil
+	}
+
 	job := ueransimValidationJob(agw, releaseName, jobName, uePod, desiredHash)
 	if err := controllerutil.SetControllerReference(agw, job, r.Scheme); err != nil {
 		return false, "UERANSIMValidationOwnerRefFailed", err.Error(), err
@@ -75,6 +82,63 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidation(ctx context.Context, ag
 		return false, "UERANSIMValidationJobCreateFailed", err.Error(), err
 	}
 	return false, "UERANSIMValidationJobCreated", fmt.Sprintf("created one-shot UERANSIM validation job %s/%s", agw.Namespace, jobName), nil
+}
+
+func (r *MagmaAGWReconciler) reconcileUERANSIMValidationRollout(ctx context.Context, namespace, releaseName, validationHash string) (bool, string, string, error) {
+	var deployments appsv1.DeploymentList
+	if err := r.List(ctx, &deployments,
+		client.InNamespace(namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/instance": releaseName,
+			"app.kubernetes.io/name":     "magma-agw-upstream",
+		},
+	); err != nil {
+		return false, "UERANSIMValidationRolloutReadFailed", err.Error(), err
+	}
+
+	required := map[string]bool{
+		releaseName + "-ueransim-gnb": false,
+		releaseName + "-ueransim-ue":  false,
+	}
+	patched := false
+	for i := range deployments.Items {
+		deployment := &deployments.Items[i]
+		if _, ok := required[deployment.Name]; !ok {
+			continue
+		}
+		required[deployment.Name] = true
+		if deployment.Spec.Template.Annotations[ueransimValidationRolloutHash] == validationHash {
+			continue
+		}
+		patch := client.MergeFrom(deployment.DeepCopy())
+		if deployment.Spec.Template.Annotations == nil {
+			deployment.Spec.Template.Annotations = map[string]string{}
+		}
+		deployment.Spec.Template.Annotations[ueransimValidationRolloutHash] = validationHash
+		if err := r.Patch(ctx, deployment, patch); err != nil {
+			return false, "UERANSIMValidationRolloutPatchFailed", err.Error(), err
+		}
+		patched = true
+	}
+	for name, found := range required {
+		if !found {
+			return false, "WaitingForUERANSIMDeployment", fmt.Sprintf("waiting for UERANSIM deployment %s/%s before one-shot validation", namespace, name), nil
+		}
+	}
+	if patched {
+		return false, "UERANSIMValidationRolloutStarted", "recreated UERANSIM gNB and UE deployments for one-shot validation", nil
+	}
+
+	ready, message, err := r.deploymentsReady(ctx, namespace, releaseName, "UERANSIM validation", func(deployment appsv1.Deployment) bool {
+		return deployment.Name == releaseName+"-ueransim-gnb" || deployment.Name == releaseName+"-ueransim-ue"
+	}, "")
+	if err != nil {
+		return false, "UERANSIMValidationRolloutReadinessFailed", err.Error(), err
+	}
+	if !ready {
+		return false, "WaitingForUERANSIMValidationRollout", message, nil
+	}
+	return true, "UERANSIMValidationRolloutReady", "UERANSIM gNB and UE deployments were recreated and are ready", nil
 }
 
 func (r *MagmaAGWReconciler) ueransimUEPod(ctx context.Context, namespace, releaseName string) (string, error) {

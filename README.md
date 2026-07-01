@@ -14,7 +14,7 @@ The current controller intentionally shells out to pinned Helm v3 inside the man
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.22
+ghcr.io/infinitydon/magma-operator:v0.1.23
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.22
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.22
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.23
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.23
 ```
 
 ## Install
@@ -216,10 +216,11 @@ UERANSIM is intentionally treated as an end-user simulator, not as part of AGW
 steady-state health. It can enter idle/session states that do not prove the AGW
 is broken. The operator therefore does not block `Ready=True` on UERANSIM pod
 or tunnel state. If `ueransimValidation.enabled=true`, it creates a one-shot
-validation Job named `<release>-ueransim-validation`; the Job waits for the UE
-pod's `uesimtun0`, runs ping, and optionally runs iperf3. Change
-`ueransimValidation.trigger` to run the validation again. The result is reported
-in the separate `UERANSIMValidated` condition.
+validation Job named `<release>-ueransim-validation`. Each new
+`ueransimValidation.trigger` value first recreates the UERANSIM gNB and UE
+Deployments, waits for them to become ready, then the Job waits for the UE pod's
+`uesimtun0`, runs ping, and optionally runs iperf3. The result is reported in
+the separate `UERANSIMValidated` condition.
 
 The AGW chart defaults to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the chart values through `spec.values`, for example:
 
