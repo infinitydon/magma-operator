@@ -78,7 +78,7 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if chartPath == "" {
 		chartPath = "magma-fullstack-upstream"
 	}
-	if !orc8r.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !orc8r.DeletionTimestamp.IsZero() {
 		return r.reconcileOrc8rDeletion(ctx, &orc8r, releaseName)
 	}
 	if !controllerutil.ContainsFinalizer(&orc8r, magmaOrc8rFinalizer) {
@@ -152,7 +152,7 @@ func (r *MagmaOrc8rReconciler) reconcileOrc8rDeletion(ctx context.Context, orc8r
 
 func (r *MagmaOrc8rReconciler) patchMagmalteForHTTPNodePort(ctx context.Context, namespace string) error {
 	var deploy appsv1.Deployment
-	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "nms-magmalte"}, &deploy); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: magmalteDeploymentName}, &deploy); err != nil {
 		return err
 	}
 	if len(deploy.Spec.Template.Spec.Containers) == 0 {

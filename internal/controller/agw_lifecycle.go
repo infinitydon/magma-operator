@@ -104,7 +104,7 @@ func (r *MagmaAGWReconciler) reconcileAGWTrustBundle(ctx context.Context, agw *m
 		if agwSecret.Labels == nil {
 			agwSecret.Labels = map[string]string{}
 		}
-		agwSecret.Labels["app.kubernetes.io/managed-by"] = "magma-operator"
+		agwSecret.Labels[labelAppManagedBy] = managedByMagmaOperator
 		if agwSecret.Annotations == nil {
 			agwSecret.Annotations = map[string]string{}
 		}
@@ -169,9 +169,9 @@ func rootCASyncJob(namespace, name, releaseName, secretName, pvcName, hash strin
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/component":  agwRootCASyncComponent,
-				"app.kubernetes.io/instance":   releaseName,
-				"app.kubernetes.io/managed-by": "magma-operator",
+				labelAppComponent: agwRootCASyncComponent,
+				labelAppInstance:  releaseName,
+				labelAppManagedBy: managedByMagmaOperator,
 			},
 			Annotations: map[string]string{
 				rootCAHashAnnotation: hash,
@@ -186,7 +186,7 @@ func rootCASyncJob(namespace, name, releaseName, secretName, pvcName, hash strin
 					Containers: []corev1.Container{{
 						Name:    "sync-rootca",
 						Image:   "busybox:1.36",
-						Command: []string{"sh", "-ceu"},
+						Command: []string{"sh", shellExitOnErrorCommand},
 						Args: []string{`mkdir -p /var/opt/magma/certs
 cp -f /certs/rootCA.pem /var/opt/magma/certs/rootCA.pem
 chmod 0644 /var/opt/magma/certs/rootCA.pem`},
@@ -222,12 +222,6 @@ func (r *MagmaAGWReconciler) annotateAGWCoreDeploymentsForRootCA(ctx context.Con
 	})
 }
 
-func (r *MagmaAGWReconciler) annotateUERANSIMDeploymentsForRootCA(ctx context.Context, namespace, releaseName, hash string) error {
-	return r.annotateDeploymentsForRootCA(ctx, namespace, releaseName, hash, func(deployment appsv1.Deployment) bool {
-		return isUERANSIMDeployment(deployment.Name)
-	})
-}
-
 func (r *MagmaAGWReconciler) annotateDeploymentsForRootCA(ctx context.Context, namespace, releaseName, hash string, include func(appsv1.Deployment) bool) error {
 	if hash == "" {
 		return nil
@@ -236,8 +230,8 @@ func (r *MagmaAGWReconciler) annotateDeploymentsForRootCA(ctx context.Context, n
 	err := r.List(ctx, &deployments,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
-			"app.kubernetes.io/instance": releaseName,
-			"app.kubernetes.io/name":     "magma-agw-upstream",
+			labelAppInstance: releaseName,
+			labelAppName:     magmaAGWChartName,
 		},
 	)
 	if err != nil {
@@ -263,31 +257,13 @@ func (r *MagmaAGWReconciler) annotateDeploymentsForRootCA(ctx context.Context, n
 	return nil
 }
 
-func (r *MagmaAGWReconciler) agwCoreDeploymentsReady(ctx context.Context, namespace, releaseName string) (bool, string, error) {
-	return r.deploymentsReady(ctx, namespace, releaseName, "AGW core", func(deployment appsv1.Deployment) bool {
-		return !isUERANSIMDeployment(deployment.Name)
-	}, "")
-}
-
-func (r *MagmaAGWReconciler) agwCoreDeploymentsReadyForRootCA(ctx context.Context, namespace, releaseName, hash string) (bool, string, error) {
-	return r.deploymentsReady(ctx, namespace, releaseName, "AGW core", func(deployment appsv1.Deployment) bool {
-		return !isUERANSIMDeployment(deployment.Name)
-	}, hash)
-}
-
-func (r *MagmaAGWReconciler) ueransimDeploymentsReady(ctx context.Context, namespace, releaseName string) (bool, string, error) {
-	return r.deploymentsReady(ctx, namespace, releaseName, "UERANSIM", func(deployment appsv1.Deployment) bool {
-		return isUERANSIMDeployment(deployment.Name)
-	}, "")
-}
-
 func (r *MagmaAGWReconciler) deploymentsReady(ctx context.Context, namespace, releaseName, label string, include func(appsv1.Deployment) bool, requiredRootCAHash string) (bool, string, error) {
 	var deployments appsv1.DeploymentList
 	err := r.List(ctx, &deployments,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
-			"app.kubernetes.io/instance": releaseName,
-			"app.kubernetes.io/name":     "magma-agw-upstream",
+			labelAppInstance: releaseName,
+			labelAppName:     magmaAGWChartName,
 		},
 	)
 	if err != nil {

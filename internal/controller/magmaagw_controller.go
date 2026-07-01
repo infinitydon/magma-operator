@@ -74,6 +74,8 @@ type MagmaAGWReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
+//
+//nolint:gocyclo // Reconcile coordinates AGW lifecycle phases and keeps their status transitions in one ordered flow.
 func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -88,10 +90,10 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	chartPath := agw.Spec.ChartPath
 	if chartPath == "" {
-		chartPath = "magma-agw-upstream"
+		chartPath = magmaAGWChartName
 	}
 
-	if !agw.ObjectMeta.DeletionTimestamp.IsZero() {
+	if !agw.DeletionTimestamp.IsZero() {
 		return r.reconcileAGWDeletion(ctx, &agw, releaseName)
 	}
 	if !controllerutil.ContainsFinalizer(&agw, magmaAGWFinalizer) {
@@ -401,8 +403,8 @@ func (r *MagmaAGWReconciler) cleanupStaleAGWPods(ctx context.Context, namespace,
 	err := r.List(ctx, &pods,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
-			"app.kubernetes.io/instance": releaseName,
-			"app.kubernetes.io/name":     "magma-agw-upstream",
+			labelAppInstance: releaseName,
+			labelAppName:     magmaAGWChartName,
 		},
 	)
 	if err != nil {

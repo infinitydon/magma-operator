@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -69,7 +68,7 @@ func (r *MagmaAGWReconciler) reconcileAGWIdentity(ctx context.Context, agw *magm
 		if secret.Labels == nil {
 			secret.Labels = map[string]string{}
 		}
-		secret.Labels["app.kubernetes.io/managed-by"] = "magma-operator"
+		secret.Labels[labelAppManagedBy] = managedByMagmaOperator
 		secret.Labels[agwIdentityManagedLabel] = agwIdentityManagedValue
 		if secret.Annotations == nil {
 			secret.Annotations = map[string]string{}
@@ -199,7 +198,7 @@ func (r *MagmaAGWReconciler) reconcileAGWGatewayRegistration(ctx context.Context
 		return false, "NMSCertSecretReadFailed", err
 	}
 	var magmalte appsv1.Deployment
-	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "nms-magmalte"}, &magmalte); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: magmalteDeploymentName}, &magmalte); err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, "WaitingForMagmalte", nil
 		}
@@ -252,8 +251,8 @@ func registrationJob(namespace, name, image, certSecret, apiHost, networkID, pay
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/component":  "agw-registration",
-				"app.kubernetes.io/managed-by": "magma-operator",
+				labelAppComponent: "agw-registration",
+				labelAppManagedBy: managedByMagmaOperator,
 			},
 			Annotations: map[string]string{
 				"magma.infra.don/payload-sha256": payloadHash,
@@ -269,7 +268,7 @@ func registrationJob(namespace, name, image, certSecret, apiHost, networkID, pay
 						Name:            "register",
 						Image:           image,
 						ImagePullPolicy: corev1.PullIfNotPresent,
-						Command:         []string{"/bin/sh", "-ceu"},
+						Command:         []string{"/bin/sh", shellExitOnErrorCommand},
 						Args: []string{`until curl -sk --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks" >/dev/null; do sleep 5; done
 until [ "$(curl -sk -o /tmp/network-get.out -w '%{http_code}' --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks/$NETWORK_ID")" = "200" ]; do sleep 5; done
 cat > /tmp/tier.json <<EOF
@@ -300,16 +299,16 @@ curl -skf --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https:/
 							{Name: "GATEWAY_ID", Value: gatewayIDFromPayload(payload)},
 							{Name: "GATEWAY_TIER", Value: gatewayTierFromPayload(payload)},
 							{Name: "GATEWAY_PAYLOAD", Value: payload},
-							{Name: "API_CERT_FILENAME", Value: "/run/secrets/admin_operator.pem"},
-							{Name: "API_PRIVATE_KEY_FILENAME", Value: "/run/secrets/admin_operator.key.pem"},
+							{Name: "API_CERT_FILENAME", Value: adminOperatorCertPath},
+							{Name: "API_PRIVATE_KEY_FILENAME", Value: adminOperatorKeyPath},
 						},
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: "orc8r-secrets-certs", MountPath: "/run/secrets/admin_operator.pem", SubPath: "admin_operator.pem", ReadOnly: true},
-							{Name: "orc8r-secrets-certs", MountPath: "/run/secrets/admin_operator.key.pem", SubPath: "admin_operator.key.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: "admin_operator.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: "admin_operator.key.pem", ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{{
-						Name: "orc8r-secrets-certs",
+						Name: defaultNMSAdminCertSecretName,
 						VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
 							SecretName:  certSecret,
 							DefaultMode: ptr.To[int32](0444),
@@ -357,7 +356,7 @@ func (r *MagmaAGWReconciler) reconcileAGWGatewayDeregistration(ctx context.Conte
 		return false, "NMSCertSecretReadFailed", err.Error(), err
 	}
 	var magmalte appsv1.Deployment
-	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: "nms-magmalte"}, &magmalte); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: magmalteDeploymentName}, &magmalte); err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, "WaitingForMagmalte", "waiting for magmalte before gateway deregistration", nil
 		}
@@ -398,8 +397,8 @@ func deregistrationJob(namespace, name, image, certSecret, apiHost, networkID, g
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/component":  "agw-deregistration",
-				"app.kubernetes.io/managed-by": "magma-operator",
+				labelAppComponent: "agw-deregistration",
+				labelAppManagedBy: managedByMagmaOperator,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -412,7 +411,7 @@ func deregistrationJob(namespace, name, image, certSecret, apiHost, networkID, g
 						Name:            "deregister",
 						Image:           image,
 						ImagePullPolicy: corev1.PullIfNotPresent,
-						Command:         []string{"/bin/sh", "-ceu"},
+						Command:         []string{"/bin/sh", shellExitOnErrorCommand},
 						Args: []string{`until curl -sk --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks" >/dev/null; do sleep 5; done
 curl -skf -X DELETE --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/lte/$NETWORK_ID/gateways/$GATEWAY_ID" >/dev/null || true
 curl -skf -X DELETE --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks/$NETWORK_ID/gateways/$GATEWAY_ID" >/dev/null || true`},
@@ -420,16 +419,16 @@ curl -skf -X DELETE --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME
 							{Name: "API_HOST", Value: apiHost},
 							{Name: "NETWORK_ID", Value: networkID},
 							{Name: "GATEWAY_ID", Value: gatewayID},
-							{Name: "API_CERT_FILENAME", Value: "/run/secrets/admin_operator.pem"},
-							{Name: "API_PRIVATE_KEY_FILENAME", Value: "/run/secrets/admin_operator.key.pem"},
+							{Name: "API_CERT_FILENAME", Value: adminOperatorCertPath},
+							{Name: "API_PRIVATE_KEY_FILENAME", Value: adminOperatorKeyPath},
 						},
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: "orc8r-secrets-certs", MountPath: "/run/secrets/admin_operator.pem", SubPath: "admin_operator.pem", ReadOnly: true},
-							{Name: "orc8r-secrets-certs", MountPath: "/run/secrets/admin_operator.key.pem", SubPath: "admin_operator.key.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: "admin_operator.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: "admin_operator.key.pem", ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{{
-						Name: "orc8r-secrets-certs",
+						Name: defaultNMSAdminCertSecretName,
 						VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
 							SecretName:  certSecret,
 							DefaultMode: ptr.To[int32](0444),
@@ -596,8 +595,4 @@ func updateAGWStatusDetails(agw *magmav1alpha1.MagmaAGW, identity *agwIdentitySt
 	agw.Status.HardwareID = identity.HardwareID
 	agw.Status.ChallengePublicKeyHash = identity.PublicKeyHash
 	agw.Status.GatewayRegistered = identity.GatewayRegistered
-}
-
-func requeueAfterAGWRegistrationWait() ctrl.Result {
-	return ctrl.Result{RequeueAfter: 20_000_000_000}
 }

@@ -89,8 +89,8 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidationRollout(ctx context.Cont
 	if err := r.List(ctx, &deployments,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
-			"app.kubernetes.io/instance": releaseName,
-			"app.kubernetes.io/name":     "magma-agw-upstream",
+			labelAppInstance: releaseName,
+			labelAppName:     magmaAGWChartName,
 		},
 	); err != nil {
 		return false, "UERANSIMValidationRolloutReadFailed", err.Error(), err
@@ -146,8 +146,8 @@ func (r *MagmaAGWReconciler) ueransimUEPod(ctx context.Context, namespace, relea
 	if err := r.List(ctx, &pods,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
-			"app.kubernetes.io/instance":  releaseName,
-			"app.kubernetes.io/component": "ueransim-ue",
+			labelAppInstance:  releaseName,
+			labelAppComponent: "ueransim-ue",
 		},
 	); err != nil {
 		return "", err
@@ -166,8 +166,8 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidationRBAC(ctx context.Context
 		if sa.Labels == nil {
 			sa.Labels = map[string]string{}
 		}
-		sa.Labels["app.kubernetes.io/managed-by"] = "magma-operator"
-		sa.Labels["app.kubernetes.io/component"] = ueransimValidationComponent
+		sa.Labels[labelAppManagedBy] = managedByMagmaOperator
+		sa.Labels[labelAppComponent] = ueransimValidationComponent
 		return nil
 	}); err != nil {
 		return err
@@ -227,9 +227,9 @@ func ueransimValidationJob(agw *magmav1alpha1.MagmaAGW, releaseName, jobName, ue
 			Name:      jobName,
 			Namespace: agw.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/component":  ueransimValidationComponent,
-				"app.kubernetes.io/instance":   releaseName,
-				"app.kubernetes.io/managed-by": "magma-operator",
+				labelAppComponent: ueransimValidationComponent,
+				labelAppInstance:  releaseName,
+				labelAppManagedBy: managedByMagmaOperator,
 			},
 			Annotations: map[string]string{
 				ueransimValidationHash: specHash,
@@ -251,7 +251,7 @@ func ueransimValidationJob(agw *magmav1alpha1.MagmaAGW, releaseName, jobName, ue
 							"PING_HOST=" + pingHost,
 							"IPERF_SERVER=" + agw.Spec.UERANSIMValidation.IPerfServer,
 							"IPERF_PORT=" + strconv.Itoa(int(iperfPort)),
-							"sh", "-ceu", `deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+							"sh", shellExitOnErrorCommand, `deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
 echo "Validating UE pod"
 while [ "$(date +%s)" -lt "$deadline" ]; do
   ue_ip="$(ip -4 -o addr show uesimtun0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 || true)"
@@ -280,5 +280,5 @@ func ueransimValidationEnabled(spec magmav1alpha1.MagmaAGWUERANSIMValidationSpec
 
 func ueransimValidationSpecHash(agw *magmav1alpha1.MagmaAGW, releaseName string) string {
 	spec := agw.Spec.UERANSIMValidation
-	return sha256Hex([]byte(fmt.Sprintf("%s|%s|%s|%s|%d|%d|%s", releaseName, spec.Trigger, spec.UEDeploymentName, spec.PingHost, spec.IPerfPort, spec.TimeoutSeconds, spec.IPerfServer)))
+	return sha256Hex(fmt.Appendf(nil, "%s|%s|%s|%s|%d|%d|%s", releaseName, spec.Trigger, spec.UEDeploymentName, spec.PingHost, spec.IPerfPort, spec.TimeoutSeconds, spec.IPerfServer))
 }
