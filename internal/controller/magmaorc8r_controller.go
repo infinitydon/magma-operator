@@ -183,14 +183,14 @@ func (r *MagmaOrc8rReconciler) recreateOrc8rBootstrapJobForSecretHash(ctx contex
 	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: jobName}, &job); err != nil {
 		return false, client.IgnoreNotFound(err)
 	}
-	if job.Annotations["magma.infra.don/orc8r-secret-hash"] == hash {
-		return false, nil
-	}
-	if job.Status.Succeeded > 0 || job.Status.Failed > 0 {
+	if job.Status.Failed > 0 || (job.Status.Succeeded > 0 && job.Annotations["magma.infra.don/orc8r-secret-hash"] != hash) {
 		if err := r.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
 			return false, err
 		}
 		return true, nil
+	}
+	if job.Annotations["magma.infra.don/orc8r-secret-hash"] == hash {
+		return false, nil
 	}
 	patch := client.MergeFrom(job.DeepCopy())
 	if job.Annotations == nil {

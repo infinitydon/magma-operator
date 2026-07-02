@@ -14,7 +14,7 @@ The manager reconciles Kubernetes objects directly through the API server. It do
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.36
+ghcr.io/infinitydon/magma-operator:v0.1.37
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.36
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.36
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.37
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.37
 ```
 
 ## Install
