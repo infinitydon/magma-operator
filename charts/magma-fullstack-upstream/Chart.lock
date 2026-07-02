@@ -1,9 +1,0 @@
-dependencies:
-- name: orc8r
-  repository: https://linuxfoundation.jfrog.io/artifactory/magma-helm-prod
-  version: 1.9.0
-- name: lte-orc8r
-  repository: https://linuxfoundation.jfrog.io/artifactory/magma-helm-prod
-  version: 1.9.0
-digest: sha256:b91604bb6bc7b0374c0c71a1b47f2708b37ed99f4d7dd850869612b611b4f0d6
-generated: "2026-06-28T09:53:43.5025107-04:00"

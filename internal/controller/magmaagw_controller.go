@@ -220,16 +220,16 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	removeAGWCondition(&agw, "UERANSIMReady")
 
-	err = reconcileHelmRelease(ctx, helmRelease{
+	err = reconcileNativeRelease(ctx, r.Client, r.Scheme, &agw, nativeRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
-		ChartPath:   magmaAGWChartName,
+		Manifest:    "agw.yaml",
 		Values:      values,
-		Wait:        !datapathEnabled || datapathReady,
+		ApplyFilter: nativeAGWApplyFilter(values["simulator.enabled"] == stringTrue),
 	})
 	if err != nil {
-		log.Error(err, "failed to reconcile Magma AGW release")
-		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "HelmReconcileFailed", err.Error())
+		log.Error(err, "failed to reconcile Magma AGW resources")
+		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "NativeReconcileFailed", err.Error())
 	}
 	if err := r.annotateAGWCoreDeploymentsForRootCA(ctx, req.Namespace, releaseName, agw.Status.TrustBundleHash); err != nil {
 		log.Error(err, "failed to annotate AGW deployments for root CA rollout")
@@ -253,7 +253,7 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if ueransimGatePending {
-		message := fmt.Sprintf("Magma AGW Helm release is ready with UERANSIM disabled. After AGW is registered with Orc8r and the UE is provisioned in NMS, create or update ConfigMap %s/%s with data ready=true.", req.Namespace, ueransimGateName)
+		message := fmt.Sprintf("Magma AGW resources are ready with UERANSIM disabled. After AGW is registered with Orc8r and the UE is provisioned in NMS, create or update ConfigMap %s/%s with data ready=true.", req.Namespace, ueransimGateName)
 		return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionFalse, "WaitingForUERANSIMGate", message)
 	}
 
@@ -269,10 +269,10 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		setAGWCondition(&agw, "UERANSIMValidated", metav1.ConditionUnknown, validationReason, validationMessage)
 	}
 	if !validationReady {
-		return r.updateAGWReadyStatusWithRequeue(ctx, &agw, releaseName, "HelmReleaseReady", "Magma AGW Helm release is ready", 15*time.Second)
+		return r.updateAGWReadyStatusWithRequeue(ctx, &agw, releaseName, "NativeResourcesReady", "Magma AGW resources are ready", 15*time.Second)
 	}
 
-	return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionTrue, "HelmReleaseReady", "Magma AGW Helm release is ready")
+	return r.updateAGWStatus(ctx, &agw, releaseName, metav1.ConditionTrue, "NativeResourcesReady", "Magma AGW resources are ready")
 }
 
 func (r *MagmaAGWReconciler) ueransimStartGateReady(ctx context.Context, namespace string, agw *magmav1alpha1.MagmaAGW, releaseName string) (bool, string, error) {
@@ -344,8 +344,8 @@ func (r *MagmaAGWReconciler) reconcileAGWDeletion(ctx context.Context, agw *magm
 		return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 	}
 
-	if err := uninstallHelmRelease(ctx, releaseName, agw.Namespace); err != nil {
-		_, statusErr := r.updateAGWStatus(ctx, agw, releaseName, metav1.ConditionFalse, "HelmUninstallFailed", err.Error())
+	if err := deleteNativeRelease(ctx, r.Client, nativeRelease{ReleaseName: releaseName, Namespace: agw.Namespace, Manifest: "agw.yaml"}); err != nil {
+		_, statusErr := r.updateAGWStatus(ctx, agw, releaseName, metav1.ConditionFalse, "NativeDeleteFailed", err.Error())
 		if statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
@@ -398,7 +398,7 @@ func (r *MagmaAGWReconciler) cleanupStaleAGWPods(ctx context.Context, namespace,
 		client.InNamespace(namespace),
 		client.MatchingLabels{
 			labelAppInstance: releaseName,
-			labelAppName:     magmaAGWChartName,
+			labelAppName:     magmaAGWAppName,
 		},
 	)
 	if err != nil {
@@ -426,7 +426,7 @@ func (r *MagmaAGWReconciler) reconcileAGWDatapathLabels(ctx context.Context, nam
 	}
 
 	var daemonSet appsv1.DaemonSet
-	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "agw-node-prep"}, &daemonSet); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: agwNodePrepName}, &daemonSet); err != nil {
 		if apierrors.IsNotFound(err) {
 			if err := r.removeAGWDatapathLabels(ctx, nodes, datapath); err != nil {
 				return false, "", err
@@ -511,7 +511,7 @@ func (r *MagmaAGWReconciler) agwDatapathNodesReady(ctx context.Context, namespac
 	}
 
 	var daemonSet appsv1.DaemonSet
-	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "agw-node-prep"}, &daemonSet); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: agwNodePrepName}, &daemonSet); err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}

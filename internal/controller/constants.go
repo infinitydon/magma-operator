@@ -7,8 +7,9 @@ const (
 	labelAppName      = "app.kubernetes.io/name"
 
 	managedByMagmaOperator = "magma-operator"
-	magmaAGWChartName      = "magma-agw-upstream"
-	magmaOrc8rChartName    = "magma-fullstack-upstream"
+	magmaAGWAppName        = "magma-agw-upstream"
+	magmaOrc8rAppName      = "magma-fullstack-upstream"
+	agwNodePrepName        = "agw-node-prep"
 	magmalteDeploymentName = "nms-magmalte"
 
 	shellExitOnErrorCommand = "-ceu"

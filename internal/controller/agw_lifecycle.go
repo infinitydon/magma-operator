@@ -231,7 +231,7 @@ func (r *MagmaAGWReconciler) annotateDeploymentsForRootCA(ctx context.Context, n
 		client.InNamespace(namespace),
 		client.MatchingLabels{
 			labelAppInstance: releaseName,
-			labelAppName:     magmaAGWChartName,
+			labelAppName:     magmaAGWAppName,
 		},
 	)
 	if err != nil {
@@ -263,7 +263,7 @@ func (r *MagmaAGWReconciler) deploymentsReady(ctx context.Context, namespace, re
 		client.InNamespace(namespace),
 		client.MatchingLabels{
 			labelAppInstance: releaseName,
-			labelAppName:     magmaAGWChartName,
+			labelAppName:     magmaAGWAppName,
 		},
 	)
 	if err != nil {

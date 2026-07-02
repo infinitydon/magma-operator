@@ -19,9 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -107,16 +109,31 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	mergeValues(values, orc8r.Spec.Values)
 
-	err := reconcileHelmRelease(ctx, helmRelease{
+	err := reconcileNativeRelease(ctx, r.Client, r.Scheme, &orc8r, nativeRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
-		ChartPath:   magmaOrc8rChartName,
+		Manifest:    "orc8r.yaml",
 		Values:      values,
-		Wait:        true,
 	})
 	if err != nil {
-		log.Error(err, "failed to reconcile Magma Orc8r release")
-		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "HelmReconcileFailed", err.Error())
+		log.Error(err, "failed to reconcile Magma Orc8r resources")
+		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "NativeReconcileFailed", err.Error())
+	}
+	secretHash, err := r.annotateOrc8rDeploymentsForSecretHash(ctx, req.Namespace, releaseName, defaultNMSAdminCertSecretName)
+	if err != nil {
+		log.Error(err, "failed to annotate Orc8r deployments for cert secret rollout")
+		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "Orc8rSecretRolloutFailed", err.Error())
+	}
+	if recreated, err := r.recreateOrc8rBootstrapJobForSecretHash(ctx, req.Namespace, releaseName+"-nms-admin", secretHash); err != nil {
+		log.Error(err, "failed to reconcile Orc8r bootstrap job for cert secret rollout")
+		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "Orc8rBootstrapJobFailed", err.Error())
+	} else if recreated {
+		result, err := r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "Orc8rBootstrapJobRecreated", "recreated Orc8r bootstrap job after cert secret change")
+		if err != nil {
+			return result, err
+		}
+		result.RequeueAfter = 10 * time.Second
+		return result, nil
 	}
 	if orc8r.Spec.NMSNodePort != nil {
 		if err := r.patchMagmalteForHTTPNodePort(ctx, req.Namespace); err != nil {
@@ -125,15 +142,86 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionTrue, "HelmReleaseReady", "Magma Orc8r Helm release is ready")
+	return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionTrue, "NativeResourcesReady", "Magma Orc8r resources are ready")
+}
+
+func (r *MagmaOrc8rReconciler) annotateOrc8rDeploymentsForSecretHash(ctx context.Context, namespace, releaseName, secretName string) (string, error) {
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, &secret); err != nil {
+		return "", client.IgnoreNotFound(err)
+	}
+	hash := secretDataHash(secret.Data)
+	var deployments appsv1.DeploymentList
+	if err := r.List(ctx, &deployments,
+		client.InNamespace(namespace),
+		client.MatchingLabels{labelAppInstance: releaseName},
+	); err != nil {
+		return "", err
+	}
+	for i := range deployments.Items {
+		deployment := &deployments.Items[i]
+		if deployment.Spec.Template.Annotations["magma.infra.don/orc8r-secret-hash"] == hash {
+			continue
+		}
+		patch := client.MergeFrom(deployment.DeepCopy())
+		if deployment.Spec.Template.Annotations == nil {
+			deployment.Spec.Template.Annotations = map[string]string{}
+		}
+		deployment.Spec.Template.Annotations["magma.infra.don/orc8r-secret-hash"] = hash
+		if err := r.Patch(ctx, deployment, patch); err != nil {
+			return "", err
+		}
+	}
+	return hash, nil
+}
+
+func (r *MagmaOrc8rReconciler) recreateOrc8rBootstrapJobForSecretHash(ctx context.Context, namespace, jobName, hash string) (bool, error) {
+	if hash == "" {
+		return false, nil
+	}
+	var job batchv1.Job
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: jobName}, &job); err != nil {
+		return false, client.IgnoreNotFound(err)
+	}
+	if job.Annotations["magma.infra.don/orc8r-secret-hash"] == hash {
+		return false, nil
+	}
+	if job.Status.Succeeded > 0 || job.Status.Failed > 0 {
+		if err := r.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		return true, nil
+	}
+	patch := client.MergeFrom(job.DeepCopy())
+	if job.Annotations == nil {
+		job.Annotations = map[string]string{}
+	}
+	job.Annotations["magma.infra.don/orc8r-secret-hash"] = hash
+	return false, r.Patch(ctx, &job, patch)
+}
+
+func secretDataHash(data map[string][]byte) string {
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	hashInput := []byte{}
+	for _, key := range keys {
+		hashInput = append(hashInput, key...)
+		hashInput = append(hashInput, 0)
+		hashInput = append(hashInput, data[key]...)
+		hashInput = append(hashInput, 0)
+	}
+	return sha256Hex(hashInput)
 }
 
 func (r *MagmaOrc8rReconciler) reconcileOrc8rDeletion(ctx context.Context, orc8r *magmav1alpha1.MagmaOrc8r, releaseName string) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(orc8r, magmaOrc8rFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	if err := uninstallHelmRelease(ctx, releaseName, orc8r.Namespace); err != nil {
-		_, statusErr := r.updateOrc8rStatus(ctx, orc8r, releaseName, metav1.ConditionFalse, "HelmUninstallFailed", err.Error())
+	if err := deleteNativeRelease(ctx, r.Client, nativeRelease{ReleaseName: releaseName, Namespace: orc8r.Namespace, Manifest: "orc8r.yaml"}); err != nil {
+		_, statusErr := r.updateOrc8rStatus(ctx, orc8r, releaseName, metav1.ConditionFalse, "NativeDeleteFailed", err.Error())
 		if statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}

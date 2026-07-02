@@ -1,20 +1,20 @@
 # Magma Operator
 
-Kubebuilder operator for managing Magma upstream Orc8r/NMS and AGW deployments with operator-bundled chart assets.
+Kubebuilder operator for managing Magma upstream Orc8r/NMS and AGW deployments with controller-owned Kubernetes object reconciliation.
 
 The operator reconciles:
 
-- `MagmaOrc8r`: deploys Orc8r, NMS/MagmaLTE, PostgreSQL, bootstrap/admin jobs, and generated secrets through `magma-fullstack-upstream`.
-- `MagmaAGW`: deploys containerized AGW, idempotent node preparation, Multus/UERANSIM simulator resources, and AGW node anti-affinity through `magma-agw-upstream`.
+- `MagmaOrc8r`: deploys Orc8r, NMS/MagmaLTE, PostgreSQL, bootstrap/admin jobs, and generated secrets.
+- `MagmaAGW`: deploys containerized AGW, idempotent node preparation, Multus/UERANSIM simulator resources, and AGW node anti-affinity.
 
-The manager image includes pinned Helm v3 and the Magma chart assets under `/opt/magma-operator/charts`, so reconciliation does not clone or fetch charts from an external repository. The chart source is not user-selectable through the CR API.
+The manager reconciles Kubernetes objects directly through the API server. It does not clone chart repositories or invoke Helm at runtime.
 
 ## Image
 
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.28
+ghcr.io/infinitydon/magma-operator:v0.1.36
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.28
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.28
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.36
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.36
 ```
 
 ## Install
@@ -62,7 +62,7 @@ Label a separate worker node for UERANSIM:
 kubectl label node ebpf-bng-node-01 magma.io/ueransim-node=true --overwrite
 ```
 
-Do not schedule UERANSIM on the same worker node as AGW. The AGW chart also enables pod anti-affinity so multiple AGW releases are pushed to separate nodes when capacity is available.
+Do not schedule UERANSIM on the same worker node as AGW. The operator also applies pod anti-affinity so multiple AGW instances are pushed to separate nodes when capacity is available.
 
 ## Orc8r/NMS
 
@@ -91,7 +91,7 @@ creates LTE/5G network `mpk_test`, and creates subscriber
 host:port that users may use to open NMS; MagmaLTE uses this list to map the
 login request to the correct organization.
 
-For production, override `spec.nmsAdminPassword` and manage certificate rotation deliberately. The Helm chart reuses existing generated secrets by default to avoid accidental cert replacement during upgrades.
+For production, override `spec.nmsAdminPassword` and manage certificate rotation deliberately. The operator reuses existing generated secrets by default to avoid accidental cert replacement during upgrades.
 
 ## AGW And 5G Simulator
 
@@ -147,7 +147,7 @@ hand:
   bundle changes;
 - deletes stale unschedulable `NodeAffinity` pods left behind by older
   ReplicaSets after selector changes;
-- adds a finalizer that uninstalls the AGW Helm release and removes
+- adds a finalizer that deletes operator-managed AGW resources and removes
   operator-applied datapath-ready labels before the `MagmaAGW` object is
   removed;
 - optionally removes the Orc8r/NMS gateway record, AGW PVC, and managed
@@ -173,11 +173,11 @@ datapath:
 ```
 
 With `datapath.enabled=true`, the operator performs a two-step AGW reconcile:
-it first deploys the chart with `agw-node-prep` scheduled on the raw
+it first deploys `agw-node-prep` on the raw
 `agwNodeSelector`, while AGW workloads are gated on
 `magma.io/agw-datapath-ready=true`. Once the node-prep DaemonSet is ready, the
-operator labels the selected node and reconciles the Helm release again with
-normal readiness waiting. Set `datapath.requireMagmaOvsKmod=true` to make
+operator labels the selected node and reconciles the AGW workloads with
+normal readiness gating. Set `datapath.requireMagmaOvsKmod=true` to make
 node-prep fail fast when `/usr/local/bin/ovs-kmod-upgrade.sh` is missing.
 
 UERANSIM is enabled in the sample and selected by:
@@ -222,7 +222,7 @@ Deployments, waits for them to become ready, then the Job waits for the UE pod's
 `uesimtun0`, runs ping, and optionally runs iperf3. The result is reported in
 the separate `UERANSIMValidated` condition.
 
-The AGW chart defaults to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the chart values through `spec.values`, for example:
+The AGW manifests default to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the values through `spec.values`, for example:
 
 ```yaml
 values:
@@ -243,25 +243,19 @@ values:
 
 The legacy `values.config.gwChallenge` escape hatch is still honored as an
 import source, but the typed `identity` block should be preferred. The operator
-re-injects the managed challenge key into Helm values on every reconcile so a
+re-injects the managed challenge key into rendered values on every reconcile so a
 fresh `agwc-claim` PVC keeps the same gateway identity and can bootstrap against
 the existing NMS gateway record.
 
 ### Validated Simulator Image
 
-The current validated UERANSIM simulator image for the Magma 1.9 AGW chart is:
+The current validated UERANSIM simulator image for the Magma 1.9 AGW deployment is:
 
 ```text
 ghcr.io/infinitydon/ueransim:v3.2.4-x86-64
 ```
 
-The matching reference Dockerfile is stored in the Helm chart repo at
-`magma-agw-upstream/docs/Dockerfile.ueransim-v3.2.4`. It is documentation and
-rebuild reference only; the operator does not build simulator images during
-reconciliation.
-
-The UE ping requirements and validation procedure are captured in the Helm chart
-repo at `magma-agw-upstream/docs/ue-ping-validation.md`.
+The operator does not build simulator images during reconciliation.
 
 `ghcr.io/infinitydon/ueransim:v3.3.0-x86-64` was also tested. It pulled and ran,
 and UE registration plus PDU session establishment succeeded, but user-plane
@@ -280,8 +274,8 @@ kubectl describe magmaagw -n magma-agw agwc
 ```
 
 The operator writes a top-level `Ready` condition and detailed lifecycle
-conditions into status. Helm errors are reflected as `Ready=False` with the
-Helm output in the condition message. AGW conditions include:
+conditions into status. Native reconciliation errors are reflected as
+`Ready=False` with the failure detail in the condition message. AGW conditions include:
 
 - `IdentityReady`
 - `DatapathReady`

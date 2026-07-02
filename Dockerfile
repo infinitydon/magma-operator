@@ -22,16 +22,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./cmd/main.go
 
 FROM docker.io/library/alpine:3.20.3
-ARG HELM_VERSION=v3.17.3
-RUN apk add --no-cache ca-certificates curl tar && \
-    curl -fsSLo /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" && \
-    tar --no-same-owner --no-same-permissions -xzf /tmp/helm.tar.gz -C /tmp && \
-    mv /tmp/linux-amd64/helm /usr/local/bin/helm && \
-    rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
+RUN apk add --no-cache ca-certificates
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/charts /opt/magma-operator/charts
-RUN chmod -R a+rX /opt/magma-operator/charts
 RUN addgroup -S -g 65532 magma-operator && adduser -S -D -H -u 65532 -G magma-operator magma-operator
 USER 65532:65532
 

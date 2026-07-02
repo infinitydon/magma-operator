@@ -90,7 +90,7 @@ func (r *MagmaAGWReconciler) reconcileUERANSIMValidationRollout(ctx context.Cont
 		client.InNamespace(namespace),
 		client.MatchingLabels{
 			labelAppInstance: releaseName,
-			labelAppName:     magmaAGWChartName,
+			labelAppName:     magmaAGWAppName,
 		},
 	); err != nil {
 		return false, "UERANSIMValidationRolloutReadFailed", err.Error(), err
