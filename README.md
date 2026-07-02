@@ -17,7 +17,20 @@ Default image:
 ghcr.io/infinitydon/magma-operator:v0.1.37
 ```
 
-No default container image uses the `latest` tag.
+The operator image is intended to be published as a public GHCR package. Public
+GHCR container images can be pulled anonymously, so the default install does not
+require an `imagePullSecret`. No default container image uses the `latest` tag.
+
+Maintainers can verify anonymous registry access before a release with:
+
+```bash
+curl -fsSL "https://ghcr.io/token?service=ghcr.io&scope=repository:infinitydon/magma-operator:pull" >/dev/null
+```
+
+If this returns `401 Unauthorized`, open the package settings for
+`ghcr.io/infinitydon/magma-operator` in GitHub, change Package visibility to
+Public, and verify again. GitHub does not provide a stable documented REST or
+GraphQL mutation for changing package visibility.
 
 Build without Docker:
 
@@ -29,7 +42,17 @@ buildah push ghcr.io/infinitydon/magma-operator:v0.1.37
 
 ## Install
 
-If the GHCR package is private, create an image pull secret before or immediately after installing the manifests:
+Install the operator manifests:
+
+```bash
+kubectl apply -k config/default
+```
+
+If you fork this project and publish your own private operator image, create an
+image pull secret in `magma-operator-system` and attach it to the
+`magma-operator-controller-manager` service account before starting the
+controller. The upstream `ghcr.io/infinitydon/magma-operator` image should not
+need this step.
 
 ```bash
 kubectl -n magma-operator-system create secret docker-registry ghcr-pull-secret \
@@ -40,10 +63,6 @@ kubectl -n magma-operator-system create secret docker-registry ghcr-pull-secret 
 kubectl -n magma-operator-system patch serviceaccount magma-operator-controller-manager \
   --type=merge \
   --patch '{"imagePullSecrets":[{"name":"ghcr-pull-secret"}]}'
-```
-
-```bash
-kubectl apply -k config/default
 ```
 
 The default manager deployment runs in `magma-operator-system`.
