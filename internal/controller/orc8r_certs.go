@@ -88,15 +88,15 @@ func generateOrc8rCertSecretData(domainName, controllerHostname string) (map[str
 		return nil, "", err
 	}
 
-	rootCert, err := createCertificate("rootca."+domainName, nil, nil, &rootKey.PublicKey, rootKey, true, nil)
+	rootCert, err := createCertificate("rootca."+domainName, nil, nil, &rootKey.PublicKey, rootKey, true)
 	if err != nil {
 		return nil, "", err
 	}
-	certifierCert, err := createCertificate("certifier."+domainName, nil, nil, &certifierKey.PublicKey, certifierKey, true, nil)
+	certifierCert, err := createCertificate("certifier."+domainName, nil, nil, &certifierKey.PublicKey, certifierKey, true)
 	if err != nil {
 		return nil, "", err
 	}
-	vpnCert, err := createCertificate("vpnca."+domainName, nil, nil, &vpnKey.PublicKey, vpnKey, true, nil)
+	vpnCert, err := createCertificate("vpnca."+domainName, nil, nil, &vpnKey.PublicKey, vpnKey, true)
 	if err != nil {
 		return nil, "", err
 	}
@@ -115,18 +115,18 @@ func generateOrc8rCertSecretData(domainName, controllerHostname string) (map[str
 	}
 
 	data := map[string][]byte{
-		"rootCA.pem":             pemCert(rootCert.Raw),
-		"controller.crt":         pemCert(controllerCert.Raw),
-		"controller.key":         pemKey(controllerKey),
-		"admin_operator.pem":     pemCert(adminCert.Raw),
-		"admin_operator.key.pem": pemKey(adminKey),
-		"certifier.pem":          pemCert(certifierCert.Raw),
-		"certifier.key":          pemKey(certifierKey),
-		"vpn_ca.crt":             pemCert(vpnCert.Raw),
-		"vpn_ca.key":             pemKey(vpnKey),
-		"fluentd.pem":            pemCert(fluentdCert.Raw),
-		"fluentd.key":            pemKey(fluentdKey),
-		"bootstrapper.key":       pemKey(rootKey),
+		"rootCA.pem":         pemCert(rootCert.Raw),
+		"controller.crt":     pemCert(controllerCert.Raw),
+		"controller.key":     pemKey(controllerKey),
+		adminOperatorCertKey: pemCert(adminCert.Raw),
+		adminOperatorKeyKey:  pemKey(adminKey),
+		"certifier.pem":      pemCert(certifierCert.Raw),
+		"certifier.key":      pemKey(certifierKey),
+		"vpn_ca.crt":         pemCert(vpnCert.Raw),
+		"vpn_ca.key":         pemKey(vpnKey),
+		"fluentd.pem":        pemCert(fluentdCert.Raw),
+		"fluentd.key":        pemKey(fluentdKey),
+		"bootstrapper.key":   pemKey(rootKey),
 	}
 	hashInput := []byte(domainName + "|" + controllerHostname)
 	hashInput = append(hashInput, data["rootCA.pem"]...)
@@ -149,14 +149,14 @@ func signedCert(commonName string, sans []string, ca *x509.Certificate, caKey *r
 	if err != nil {
 		return nil, nil, err
 	}
-	cert, err := createCertificate(commonName, sans, ca, &key.PublicKey, caKey, false, nil)
+	cert, err := createCertificate(commonName, sans, ca, &key.PublicKey, caKey, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	return key, cert, nil
 }
 
-func createCertificate(commonName string, sans []string, ca *x509.Certificate, publicKey *rsa.PublicKey, signer *rsa.PrivateKey, isCA bool, parentKey any) (*x509.Certificate, error) {
+func createCertificate(commonName string, sans []string, ca *x509.Certificate, publicKey *rsa.PublicKey, signer *rsa.PrivateKey, isCA bool) (*x509.Certificate, error) {
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
@@ -181,10 +181,7 @@ func createCertificate(commonName string, sans []string, ca *x509.Certificate, p
 	if parent == nil {
 		parent = template
 	}
-	if parentKey == nil {
-		parentKey = signer
-	}
-	raw, err := x509.CreateCertificate(rand.Reader, template, parent, publicKey, parentKey)
+	raw, err := x509.CreateCertificate(rand.Reader, template, parent, publicKey, signer)
 	if err != nil {
 		return nil, fmt.Errorf("create certificate %s: %w", commonName, err)
 	}

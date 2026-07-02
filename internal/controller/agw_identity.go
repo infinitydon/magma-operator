@@ -303,8 +303,8 @@ curl -skf --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https:/
 							{Name: "API_PRIVATE_KEY_FILENAME", Value: adminOperatorKeyPath},
 						},
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: "admin_operator.pem", ReadOnly: true},
-							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: "admin_operator.key.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: adminOperatorCertKey, ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: adminOperatorKeyKey, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{{
@@ -423,8 +423,8 @@ curl -skf -X DELETE --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME
 							{Name: "API_PRIVATE_KEY_FILENAME", Value: adminOperatorKeyPath},
 						},
 						VolumeMounts: []corev1.VolumeMount{
-							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: "admin_operator.pem", ReadOnly: true},
-							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: "admin_operator.key.pem", ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorCertPath, SubPath: adminOperatorCertKey, ReadOnly: true},
+							{Name: defaultNMSAdminCertSecretName, MountPath: adminOperatorKeyPath, SubPath: adminOperatorKeyKey, ReadOnly: true},
 						},
 					}},
 					Volumes: []corev1.Volume{{

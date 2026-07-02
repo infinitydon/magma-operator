@@ -16,4 +16,6 @@ const (
 
 	adminOperatorCertPath = "/run/secrets/admin_operator.pem"
 	adminOperatorKeyPath  = "/run/secrets/admin_operator.key.pem"
+	adminOperatorCertKey  = "admin_operator.pem"
+	adminOperatorKeyKey   = "admin_operator.key.pem"
 )
