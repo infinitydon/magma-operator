@@ -48,6 +48,12 @@ kubectl apply -k config/default
 
 The default manager deployment runs in `magma-operator-system`.
 
+Confirm the controller is running:
+
+```bash
+kubectl -n magma-operator-system get deploy,pods
+```
+
 ## Node Labels
 
 Label only nodes that may host AGW workloads:
@@ -71,6 +77,13 @@ Create the namespace and Orc8r CR:
 ```bash
 kubectl create ns magma --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/magma_v1alpha1_magmaorc8r.yaml
+```
+
+Wait for Orc8r to become ready before creating AGW:
+
+```bash
+kubectl -n magma get magmaorc8r magma-orc8r
+kubectl -n magma describe magmaorc8r magma-orc8r
 ```
 
 The sample exposes MagmaLTE/NMS through NodePort `31316`:
@@ -100,6 +113,15 @@ Create the namespace and AGW CR:
 ```bash
 kubectl create ns magma-agw --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f config/samples/magma_v1alpha1_magmaagw.yaml
+```
+
+Wait for the AGW to pass identity, datapath, trust bundle, and gateway
+registration:
+
+```bash
+kubectl -n magma-agw get magmaagw agwc
+kubectl -n magma-agw describe magmaagw agwc
+kubectl -n magma-agw get pods -o wide
 ```
 
 The operator manages AGW bootstrap identity and NMS gateway registration before
@@ -197,9 +219,18 @@ ueransimValidation:
   timeoutSeconds: 240
 ```
 
-With the default `AfterAGWReady` policy, the operator installs the AGW with
-UERANSIM disabled first. Start UERANSIM only after the AGW is registered and
-healthy in Orc8r/NMS and the UE subscriber has been created in NMS:
+With the default `AfterAGWReady` policy, the operator reconciles the AGW first
+and keeps UERANSIM disabled until the readiness gate is set. Start UERANSIM only
+after:
+
+- `MagmaOrc8r` is `Ready=True`;
+- `MagmaAGW` is `Ready=True`, or it is waiting only for
+  `WaitingForUERANSIMGate`;
+- the AGW gateway is visible in NMS;
+- the UE subscriber exists in NMS;
+- a healthy node matches `spec.ueransimNodeSelector`.
+
+Set the readiness gate:
 
 ```bash
 kubectl -n magma-agw create configmap agwc-ueransim-ready \
@@ -215,12 +246,53 @@ simulator testing.
 UERANSIM is intentionally treated as an end-user simulator, not as part of AGW
 steady-state health. It can enter idle/session states that do not prove the AGW
 is broken. The operator therefore does not block `Ready=True` on UERANSIM pod
-or tunnel state. If `ueransimValidation.enabled=true`, it creates a one-shot
-validation Job named `<release>-ueransim-validation`. Each new
-`ueransimValidation.trigger` value first recreates the UERANSIM gNB and UE
-Deployments, waits for them to become ready, then the Job waits for the UE pod's
-`uesimtun0`, runs ping, and optionally runs iperf3. The result is reported in
-the separate `UERANSIMValidated` condition.
+or tunnel state.
+
+If `ueransimValidation.enabled=true`, each new
+`spec.ueransimValidation.trigger` value creates a one-shot validation run. The
+operator first recreates the UERANSIM gNB and UE Deployments, waits for them to
+be ready, then creates a Job named `<release>-ueransim-validation`. The Job
+waits for the UE pod's `uesimtun0`, runs ping over `uesimtun0`, and optionally
+runs iperf3. The result is reported in the separate `UERANSIMValidated`
+condition.
+
+Trigger a new validation run by changing only the trigger string. The value is
+not a special keyword; it only needs to be different from the previous value.
+
+Bash:
+
+```bash
+kubectl -n magma-agw patch magmaagw agwc --type=merge \
+  -p "{\"spec\":{\"ueransimValidation\":{\"trigger\":\"validation-$(date +%Y%m%d%H%M%S)\"}}}"
+```
+
+PowerShell:
+
+```powershell
+$trigger = "validation-$(Get-Date -Format yyyyMMddHHmmss)"
+kubectl -n magma-agw patch magmaagw agwc --type=merge `
+  -p "{`"spec`":{`"ueransimValidation`":{`"trigger`":`"$trigger`"}}}"
+```
+
+Watch validation:
+
+```bash
+kubectl -n magma-agw get job agwc-ueransim-validation -o wide
+kubectl -n magma-agw logs job/agwc-ueransim-validation
+kubectl -n magma-agw describe magmaagw agwc
+```
+
+The exact iperf3 command run from the UE pod is:
+
+```bash
+iperf3 -c "$IPERF_SERVER" -p "$IPERF_PORT" -B "$ue_ip" -t 5
+```
+
+`$ue_ip` is the IPv4 address discovered on `uesimtun0`. Leave
+`spec.ueransimValidation.iperfServer` empty to run ping-only validation.
+
+For the full step-by-step runbook, rerun procedure, and troubleshooting checks,
+see [docs/ueransim-validation.md](docs/ueransim-validation.md).
 
 The AGW manifests default to Multus `macvlan` for UERANSIM. If a node/NIC combination cannot support macvlan, override the values through `spec.values`, for example:
 
