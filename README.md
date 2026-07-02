@@ -14,7 +14,7 @@ The manager reconciles Kubernetes objects directly through the API server. It do
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.37
+ghcr.io/infinitydon/magma-operator:v0.1.39
 ```
 
 The operator image is intended to be published as a public GHCR package. Public
@@ -36,8 +36,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.37
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.37
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.39
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.39
 ```
 
 ## Install

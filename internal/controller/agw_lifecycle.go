@@ -113,6 +113,10 @@ func (r *MagmaAGWReconciler) reconcileAGWTrustBundle(ctx context.Context, agw *m
 			agwSecret.Data = map[string][]byte{}
 		}
 		agwSecret.Data[rootCASecretKey] = rootCA
+		delete(agwSecret.Data, "gateway.crt")
+		delete(agwSecret.Data, "gateway.key")
+		delete(agwSecret.Data, "controller.crt")
+		delete(agwSecret.Data, "controller.key")
 		return nil
 	}); err != nil {
 		return hash, false, "AGWCertSecretSyncFailed", err.Error(), err
@@ -188,6 +192,7 @@ func rootCASyncJob(namespace, name, releaseName, secretName, pvcName, hash strin
 						Image:   "busybox:1.36",
 						Command: []string{"sh", shellExitOnErrorCommand},
 						Args: []string{`mkdir -p /var/opt/magma/certs
+rm -f /var/opt/magma/certs/gateway.crt /var/opt/magma/certs/gateway.key /var/opt/magma/certs/controller.crt /var/opt/magma/certs/controller.key
 cp -f /certs/rootCA.pem /var/opt/magma/certs/rootCA.pem
 chmod 0644 /var/opt/magma/certs/rootCA.pem`},
 						VolumeMounts: []corev1.VolumeMount{

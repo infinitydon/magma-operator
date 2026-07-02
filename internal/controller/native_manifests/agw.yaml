@@ -5918,7 +5918,8 @@ spec:
             cp -f /gateway-config-source/*.yml /var/opt/magma/configs/ &&
             cp -f /gateway-config-source/gateway.mconfig /var/opt/magma/configs/gateway.mconfig &&
             cp -f /configs/control_proxy.yml /var/opt/magma/configs/  &&
-            mkdir -p /var/opt/magma/certs && cp -f /certs/* /var/opt/magma/certs/ &&
+            mkdir -p /var/opt/magma/certs &&
+            cp -f /certs/rootCA.pem /var/opt/magma/certs/rootCA.pem &&
             if [ -s /configs/gw_challenge.b64 ]; then
               base64 -d /configs/gw_challenge.b64 > /var/opt/magma/certs/gw_challenge.key &&
               chmod 0600 /var/opt/magma/certs/gw_challenge.key;

@@ -119,6 +119,10 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		log.Error(err, "failed to reconcile Magma Orc8r resources")
 		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "NativeReconcileFailed", err.Error())
 	}
+	if _, err := r.reconcileOrc8rCertSecret(ctx, &orc8r); err != nil {
+		log.Error(err, "failed to reconcile Orc8r certificate Secret")
+		return r.updateOrc8rStatus(ctx, &orc8r, releaseName, metav1.ConditionFalse, "Orc8rCertSecretFailed", err.Error())
+	}
 	secretHash, err := r.annotateOrc8rDeploymentsForSecretHash(ctx, req.Namespace, releaseName, defaultNMSAdminCertSecretName)
 	if err != nil {
 		log.Error(err, "failed to annotate Orc8r deployments for cert secret rollout")
