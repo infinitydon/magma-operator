@@ -8,7 +8,6 @@ metadata:
   namespace: magma-agw
 spec:
   releaseName: agwc
-  chartPath: magma-agw-upstream
   networkID: mpk_test
   orc8rNamespace: magma
   orc8rReleaseName: magma-fullstack

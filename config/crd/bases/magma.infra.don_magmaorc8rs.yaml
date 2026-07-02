@@ -39,21 +39,6 @@ spec:
           spec:
             description: spec defines the desired state of MagmaOrc8r
             properties:
-              chartPath:
-                description: |-
-                  ChartPath selects the bundled or external chart directory. Defaults to the
-                  bundled Orc8r chart.
-                type: string
-              chartRepository:
-                description: |-
-                  ChartRepository is an explicit external chart source override. When empty,
-                  the operator uses the chart bundled in the manager image.
-                type: string
-              chartRevision:
-                description: |-
-                  ChartRevision selects the external chartRepository revision. It is ignored
-                  when ChartRepository is empty and the bundled chart is used.
-                type: string
               controllerHostname:
                 type: string
               domainName:

@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= ghcr.io/infinitydon/magma-operator:v0.1.25
+IMG ?= ghcr.io/infinitydon/magma-operator:v0.1.28
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -121,7 +121,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	chmod -R a+rX charts
+	$(CONTAINER_TOOL) build --no-cache -t ${IMG} .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

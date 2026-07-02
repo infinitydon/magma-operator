@@ -19,5 +19,6 @@
 !go.sum
 
 # Re-include bundled Magma charts used by the manager at runtime.
+!charts
 !charts/
 !charts/**

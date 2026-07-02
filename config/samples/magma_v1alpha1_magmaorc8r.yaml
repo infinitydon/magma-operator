@@ -8,7 +8,6 @@ metadata:
   namespace: magma
 spec:
   releaseName: magma-fullstack
-  chartPath: magma-fullstack-upstream
   domainName: magma.local
   controllerHostname: controller.magma.local
   nmsNodePort: 31316

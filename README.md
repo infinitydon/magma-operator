@@ -7,14 +7,14 @@ The operator reconciles:
 - `MagmaOrc8r`: deploys Orc8r, NMS/MagmaLTE, PostgreSQL, bootstrap/admin jobs, and generated secrets through `magma-fullstack-upstream`.
 - `MagmaAGW`: deploys containerized AGW, idempotent node preparation, Multus/UERANSIM simulator resources, and AGW node anti-affinity through `magma-agw-upstream`.
 
-The manager image includes pinned Helm v3 and the Magma chart assets under `/opt/magma-operator/charts`, so normal reconciliation does not clone or fetch charts from an external repository. `spec.chartRepository` remains available only as an explicit override for development or controlled migration work.
+The manager image includes pinned Helm v3 and the Magma chart assets under `/opt/magma-operator/charts`, so reconciliation does not clone or fetch charts from an external repository. The chart source is not user-selectable through the CR API.
 
 ## Image
 
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.25
+ghcr.io/infinitydon/magma-operator:v0.1.28
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.25
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.25
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.28
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.28
 ```
 
 ## Install

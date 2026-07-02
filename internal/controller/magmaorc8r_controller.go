@@ -74,10 +74,6 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if releaseName == "" {
 		releaseName = orc8r.Name
 	}
-	chartPath := orc8r.Spec.ChartPath
-	if chartPath == "" {
-		chartPath = magmaOrc8rChartName
-	}
 	if !orc8r.DeletionTimestamp.IsZero() {
 		return r.reconcileOrc8rDeletion(ctx, &orc8r, releaseName)
 	}
@@ -114,9 +110,7 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	err := reconcileHelmRelease(ctx, helmRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
-		Repo:        orc8r.Spec.ChartRepository,
-		Revision:    orc8r.Spec.ChartRevision,
-		ChartPath:   chartPath,
+		ChartPath:   magmaOrc8rChartName,
 		Values:      values,
 		Wait:        true,
 	})

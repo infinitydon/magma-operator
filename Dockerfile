@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 FROM docker.io/library/alpine:3.20.3
 ARG HELM_VERSION=v3.17.3
-RUN apk add --no-cache ca-certificates curl git tar && \
+RUN apk add --no-cache ca-certificates curl tar && \
     curl -fsSLo /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" && \
     tar --no-same-owner --no-same-permissions -xzf /tmp/helm.tar.gz -C /tmp && \
     mv /tmp/linux-amd64/helm /usr/local/bin/helm && \

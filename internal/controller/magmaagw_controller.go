@@ -88,10 +88,6 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if releaseName == "" {
 		releaseName = agw.Name
 	}
-	chartPath := agw.Spec.ChartPath
-	if chartPath == "" {
-		chartPath = magmaAGWChartName
-	}
 
 	if !agw.DeletionTimestamp.IsZero() {
 		return r.reconcileAGWDeletion(ctx, &agw, releaseName)
@@ -227,9 +223,7 @@ func (r *MagmaAGWReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	err = reconcileHelmRelease(ctx, helmRelease{
 		ReleaseName: releaseName,
 		Namespace:   req.Namespace,
-		Repo:        agw.Spec.ChartRepository,
-		Revision:    agw.Spec.ChartRevision,
-		ChartPath:   chartPath,
+		ChartPath:   magmaAGWChartName,
 		Values:      values,
 		Wait:        !datapathEnabled || datapathReady,
 	})

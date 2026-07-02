@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"os"
@@ -15,7 +13,6 @@ import (
 
 const (
 	defaultBundledChartsDir = "/opt/magma-operator/charts"
-	defaultRevision         = "main"
 	stringTrue              = "true"
 	stringFalse             = "false"
 )
@@ -23,8 +20,6 @@ const (
 type helmRelease struct {
 	ReleaseName string
 	Namespace   string
-	Repo        string
-	Revision    string
 	ChartPath   string
 	Values      map[string]string
 	Wait        bool
@@ -37,14 +32,11 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	if release.Namespace == "" {
 		return fmt.Errorf("release namespace is required")
 	}
-	if release.Revision == "" {
-		release.Revision = defaultRevision
-	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
 
-	chartDir, err := resolveChartDir(runCtx, release)
+	chartDir, err := resolveChartDir(release)
 	if err != nil {
 		return err
 	}
@@ -72,22 +64,14 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	return nil
 }
 
-func resolveChartDir(ctx context.Context, release helmRelease) (string, error) {
-	if release.Repo != "" {
-		repoDir := chartRepoDir(release)
-		if err := syncChartRepo(ctx, release.Repo, release.Revision, repoDir); err != nil {
-			return "", err
-		}
-		return filepath.Join(repoDir, release.ChartPath), nil
-	}
-
+func resolveChartDir(release helmRelease) (string, error) {
 	for _, root := range bundledChartRoots() {
 		chartDir := filepath.Join(root, release.ChartPath)
 		if _, err := os.Stat(filepath.Join(chartDir, "Chart.yaml")); err == nil {
 			return chartDir, nil
 		}
 	}
-	return "", fmt.Errorf("bundled chart %q was not found; set spec.chartRepository only when using an explicit external chart source", release.ChartPath)
+	return "", fmt.Errorf("bundled chart %q was not found in %v", release.ChartPath, bundledChartRoots())
 }
 
 func bundledChartRoots() []string {
@@ -113,34 +97,6 @@ func uninstallHelmRelease(ctx context.Context, releaseName, namespace string) er
 		return fmt.Errorf("helm uninstall failed: %w: %s", err, out)
 	}
 	return nil
-}
-
-func syncChartRepo(ctx context.Context, repo, revision, dir string) error {
-	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		if out, err := runCommand(ctx, dir, "git", "fetch", "--all", "--tags", "--prune"); err != nil {
-			return fmt.Errorf("git fetch failed: %w: %s", err, out)
-		}
-		if out, err := runCommand(ctx, dir, "git", "checkout", revision); err != nil {
-			return fmt.Errorf("git checkout failed: %w: %s", err, out)
-		}
-		if out, err := runCommand(ctx, dir, "git", "pull", "--ff-only"); err != nil {
-			return fmt.Errorf("git pull failed: %w: %s", err, out)
-		}
-		return nil
-	}
-
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return err
-	}
-	if out, err := runCommand(ctx, "", "git", "clone", "--branch", revision, "--depth", "1", repo, dir); err != nil {
-		return fmt.Errorf("git clone failed: %w: %s", err, out)
-	}
-	return nil
-}
-
-func chartRepoDir(release helmRelease) string {
-	sum := sha256.Sum256([]byte(release.Repo + "@" + release.Revision + ":" + release.ChartPath + ":" + release.Namespace + ":" + release.ReleaseName))
-	return filepath.Join(os.TempDir(), "magma-operator-charts", hex.EncodeToString(sum[:])[:16])
 }
 
 func runCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
