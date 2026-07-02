@@ -1,0 +1,56 @@
+{{/*
+Adds the upstream Docker Compose gateway_go envoy_controller service that is
+missing from the experimental upstream agwc Helm chart.
+*/}}
+---
+{{ include "agwc.deployment" (list . "envoy-controller.deployment") -}}
+{{- define "envoy-controller.deployment" -}}
+metadata:
+  labels:
+    app.kubernetes.io/component: envoy-controller
+  name: envoy-controller
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: envoy-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: envoy-controller
+    spec:
+      containers:
+      -
+{{ include "agwc.container" (list . "envoy-controller.container")}}
+{{- end -}}
+{{- define "envoy-controller.container" -}}
+name: envoy-controller
+args:
+  - /var/opt/magma/bin/envoy_controller
+image: "{{ .Values.image.gatewayGoRepository }}/gateway_go{{ .Values.image.arch }}:{{ .Values.image.gatewayGoTag | default .Chart.AppVersion }}"
+volumeMounts:
+  - name: magma-config
+    mountPath: /etc/magma/magmad.yml
+    subPath: magmad.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/service_registry.yml
+    subPath: service_registry.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/gateway.mconfig
+    subPath: gateway.mconfig
+    readOnly: true
+  - name: controlproxy-config
+    mountPath: /etc/magma/control_proxy.yml
+    subPath: control_proxy.yml
+    readOnly: true
+  - name: {{ .Values.persistent.name }}
+    mountPath: /var/opt/magma/configs
+    subPath: configs
+  - name: {{ .Values.persistent.name }}
+    mountPath: /var/opt/magma/certs
+    subPath: certs
+  - name: {{ .Values.persistent.name }}
+    mountPath: /var/opt/magma/tmp
+    subPath: tmp
+{{- end -}}

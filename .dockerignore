@@ -17,3 +17,7 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include bundled Magma charts used by the manager at runtime.
+!charts/
+!charts/**

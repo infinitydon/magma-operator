@@ -1,0 +1,231 @@
+{{- if .Values.provisioning.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-orc8r-provisioning
+  labels:
+    app.kubernetes.io/component: orc8r-provisioning
+{{ include "magma-fullstack-upstream.labels" . | indent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: orc8r-provisioning
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: provision
+          image: {{ printf "%s:%s" .Values.orc8r.nms.magmalte.image.repository .Values.orc8r.nms.magmalte.image.tag | quote }}
+          imagePullPolicy: {{ .Values.orc8r.nms.magmalte.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ceu
+            - |
+              until nc -z {{ .Values.postgresql.name }} 5432; do sleep 5; done
+              until curl -sk --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks" >/dev/null; do sleep 5; done
+
+              node <<'NODE'
+              const {Client} = require('pg');
+              const orgName = process.env.NMS_ORGANIZATION;
+              const networkID = process.env.NETWORK_ID;
+              const customDomains = JSON.parse(process.env.NMS_CUSTOM_DOMAINS || '[]');
+              const networkIDs = networkID ? [networkID] : [];
+              const client = new Client({
+                host: process.env.MYSQL_HOST,
+                port: Number(process.env.MYSQL_PORT || 5432),
+                database: process.env.MYSQL_DB,
+                user: process.env.MYSQL_USER,
+                password: process.env.MYSQL_PASS,
+              });
+              (async () => {
+                await client.connect();
+                const existing = await client.query('SELECT "networkIDs", "customDomains" FROM "Organizations" WHERE name = $1', [orgName]);
+                if (existing.rowCount === 0) {
+                  throw new Error(`organization ${orgName} does not exist`);
+                }
+                const row = existing.rows[0];
+                const mergedNetworks = Array.from(new Set([...(row.networkIDs || []), ...networkIDs]));
+                const mergedDomains = Array.from(new Set([...(row.customDomains || []), ...customDomains]));
+                await client.query(
+                  'UPDATE "Organizations" SET "networkIDs" = $1, "customDomains" = $2, "updatedAt" = NOW() WHERE name = $3',
+                  [JSON.stringify(mergedNetworks), JSON.stringify(mergedDomains), orgName],
+                );
+                await client.end();
+              })().catch(async err => {
+                console.error(err);
+                try { await client.end(); } catch (_) {}
+                process.exit(1);
+              });
+              NODE
+
+              cat >/tmp/network.json <<EOF
+              {
+                "id": {{ .Values.provisioning.network.id | quote }},
+                "name": {{ .Values.provisioning.network.name | quote }},
+                "description": {{ .Values.provisioning.network.description | quote }},
+                "dns": {"enable_caching": false, "local_ttl": 0, "records": []},
+                "cellular": {
+                  "epc": {
+                    "cloud_subscriberdb_enabled": {{ .Values.provisioning.network.cloudSubscriberdbEnabled }},
+                    "default_rule_id": {{ .Values.provisioning.network.defaultRuleId | quote }},
+                    "enable5g_features": {{ .Values.provisioning.network.enable5gFeatures }},
+                    "lte_auth_amf": "gAA=",
+                    "lte_auth_op": "EREREREREREREREREREREQ==",
+                    "mcc": {{ .Values.provisioning.network.mcc | quote }},
+                    "mnc": {{ .Values.provisioning.network.mnc | quote }},
+                    "network_services": ["policy_enforcement"],
+                    "hss_relay_enabled": false,
+                    "gx_gy_relay_enabled": false,
+                    "sub_profiles": {
+                      {{ .Values.provisioning.network.subProfile | quote }}: {
+                        "max_dl_bit_rate": {{ .Values.provisioning.network.maxDlBitRate | int64 }},
+                        "max_ul_bit_rate": {{ .Values.provisioning.network.maxUlBitRate | int64 }}
+                      }
+                    },
+                    "mobility": {
+                      "ip_allocation_mode": "NAT",
+                      "enable_static_ip_assignments": false,
+                      "enable_multi_apn_ip_allocation": false
+                    },
+                    "tac": {{ .Values.provisioning.network.tac }}
+                  },
+                  "ran": {
+                    "bandwidth_mhz": 20,
+                    "tdd_config": {"earfcndl": 44390, "special_subframe_pattern": 7, "subframe_assignment": 2}
+                  }
+                },
+                "subscriber_config": {"network_wide_base_names": [], "network_wide_rule_names": [{{ .Values.provisioning.network.defaultRuleId | quote }}]}
+              }
+              EOF
+
+              network_code="$(curl -sk -o /tmp/network-get.out -w '%{http_code}' --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/lte/$NETWORK_ID")"
+              if [ "$network_code" = "200" ]; then
+                curl -skf -X PUT --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/network.json "https://$API_HOST/magma/v1/lte/$NETWORK_ID" >/dev/null
+              else
+                curl -skf -X POST --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/network.json "https://$API_HOST/magma/v1/lte" >/dev/null
+              fi
+
+              {{- if and .Values.provisioning.policy .Values.provisioning.policy.enabled }}
+              cat >/tmp/default-policy-rule.json <<EOF
+              {
+                "id": {{ .Values.provisioning.network.defaultRuleId | quote }},
+                "priority": {{ default 10 .Values.provisioning.policy.priority }},
+                "flow_list": [
+                  {"action": "PERMIT", "match": {"ip_proto": "IPPROTO_IP", "direction": "UPLINK"}},
+                  {"action": "PERMIT", "match": {"ip_proto": "IPPROTO_IP", "direction": "DOWNLINK"}}
+                ],
+                "tracking_type": "NO_TRACKING"
+              }
+              EOF
+              policy_code="$(curl -sk -o /tmp/default-policy-get.out -w '%{http_code}' --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/networks/$NETWORK_ID/policies/rules/{{ .Values.provisioning.network.defaultRuleId }}")"
+              if [ "$policy_code" = "200" ]; then
+                curl -skf -X PUT --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/default-policy-rule.json "https://$API_HOST/magma/v1/networks/$NETWORK_ID/policies/rules/{{ .Values.provisioning.network.defaultRuleId }}" >/dev/null
+              else
+                curl -skf -X POST --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/default-policy-rule.json "https://$API_HOST/magma/v1/networks/$NETWORK_ID/policies/rules" >/dev/null
+              fi
+              {{- end }}
+
+              {{- if .Values.provisioning.apn.enabled }}
+              cat >/tmp/apn.json <<EOF
+              {
+                "apn_name": {{ .Values.provisioning.apn.name | quote }},
+                "apn_configuration": {
+                  "ambr": {
+                    "max_bandwidth_dl": {{ .Values.provisioning.apn.maxDlBitRate | int64 }},
+                    "max_bandwidth_ul": {{ .Values.provisioning.apn.maxUlBitRate | int64 }}
+                  },
+                  "qos_profile": {
+                    "class_id": {{ .Values.provisioning.apn.qosClassId }},
+                    "priority_level": {{ .Values.provisioning.apn.priorityLevel }},
+                    "preemption_capability": {{ .Values.provisioning.apn.preemptionCapability }},
+                    "preemption_vulnerability": {{ .Values.provisioning.apn.preemptionVulnerability }}
+                  },
+                  "pdn_type": {{ .Values.provisioning.apn.pdnType }}
+                }
+              }
+              EOF
+              apn_code="$(curl -sk -o /tmp/apn-get.out -w '%{http_code}' --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/lte/$NETWORK_ID/apns/$APN_NAME")"
+              if [ "$apn_code" = "200" ]; then
+                curl -skf -X PUT --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/apn.json "https://$API_HOST/magma/v1/lte/$NETWORK_ID/apns/$APN_NAME" >/dev/null
+              else
+                curl -skf -X POST --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/apn.json "https://$API_HOST/magma/v1/lte/$NETWORK_ID/apns" >/dev/null
+              fi
+              {{- end }}
+
+              {{- if .Values.provisioning.subscriber.enabled }}
+              cat >/tmp/subscriber-one.json <<EOF
+              {
+                "id": {{ .Values.provisioning.subscriber.imsi | quote }},
+                "name": {{ .Values.provisioning.subscriber.name | quote }},
+                "lte": {
+                  "auth_algo": "MILENAGE",
+                  "auth_key": {{ .Values.provisioning.subscriber.authKey | quote }},
+                  "auth_opc": {{ .Values.provisioning.subscriber.authOpc | quote }},
+                  "state": "ACTIVE",
+                  "sub_profile": {{ .Values.provisioning.subscriber.subProfile | quote }}
+                }{{- if .Values.provisioning.apn.enabled }},
+                "active_apns": [{{ .Values.provisioning.apn.name | quote }}]{{- end }},
+                "forbidden_network_types": ["EPC"]
+              }
+              EOF
+              subscriber_code="$(curl -sk -o /tmp/subscriber-get.out -w '%{http_code}' --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" "https://$API_HOST/magma/v1/lte/$NETWORK_ID/subscribers/$SUBSCRIBER_IMSI")"
+              if [ "$subscriber_code" != "200" ]; then
+                cat >/tmp/subscriber.json <<EOF
+              [
+                $(cat /tmp/subscriber-one.json)
+              ]
+              EOF
+                curl -skf -X POST --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/subscriber.json "https://$API_HOST/magma/v1/lte/$NETWORK_ID/subscribers" >/dev/null
+              else
+                curl -skf -X PUT --cert "$API_CERT_FILENAME" --key "$API_PRIVATE_KEY_FILENAME" -H "Content-Type: application/json" --data @/tmp/subscriber-one.json "https://$API_HOST/magma/v1/lte/$NETWORK_ID/subscribers/$SUBSCRIBER_IMSI" >/dev/null
+              fi
+              {{- end }}
+          env:
+            - name: MYSQL_DB
+              value: {{ .Values.postgresql.database | quote }}
+            - name: MYSQL_HOST
+              value: {{ .Values.postgresql.name | quote }}
+            - name: MYSQL_PORT
+              value: "5432"
+            - name: MYSQL_USER
+              value: {{ .Values.postgresql.username | quote }}
+            - name: MYSQL_PASS
+              value: {{ .Values.postgresql.password | quote }}
+            - name: API_HOST
+              value: {{ .Values.orc8r.nms.magmalte.env.api_host | quote }}
+            - name: API_CERT_FILENAME
+              value: /run/secrets/admin_operator.pem
+            - name: API_PRIVATE_KEY_FILENAME
+              value: /run/secrets/admin_operator.key.pem
+            - name: NMS_ORGANIZATION
+              value: {{ .Values.nmsAdmin.organization | quote }}
+            - name: NMS_CUSTOM_DOMAINS
+              value: {{ .Values.nmsAdmin.customDomains | toJson | quote }}
+            - name: NETWORK_ID
+              value: {{ .Values.provisioning.network.id | quote }}
+            - name: SUBSCRIBER_IMSI
+              value: {{ .Values.provisioning.subscriber.imsi | quote }}
+            - name: APN_NAME
+              value: {{ .Values.provisioning.apn.name | quote }}
+          volumeMounts:
+            - name: orc8r-secrets-certs
+              mountPath: /run/secrets/admin_operator.pem
+              subPath: admin_operator.pem
+              readOnly: true
+            - name: orc8r-secrets-certs
+              mountPath: /run/secrets/admin_operator.key.pem
+              subPath: admin_operator.key.pem
+              readOnly: true
+      volumes:
+        - name: orc8r-secrets-certs
+          secret:
+            secretName: {{ .Values.secrets.certsName }}
+            defaultMode: 0444
+{{- end }}

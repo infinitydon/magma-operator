@@ -1,0 +1,44 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    make \
+    gcc-12 \
+    g++-12 \
+    libsctp-dev \
+    lksctp-tools \
+    iproute2 \
+    dnsutils \
+    iputils-ping \
+    tcpdump \
+    iperf3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100
+
+WORKDIR /opt
+
+RUN git clone --branch v3.2.4 --depth 1 https://github.com/aligungr/UERANSIM.git
+
+WORKDIR /opt/UERANSIM
+
+RUN rm -rf cmake-build-release build && \
+    mkdir -p build && \
+    cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_CXX_FLAGS="-include cstdint -include cstring -include cstdio" \
+        -DCMAKE_C_FLAGS="-include stdint.h -include string.h -include stdio.h" \
+        -G "CodeBlocks - Unix Makefiles" \
+        . -B cmake-build-release && \
+    cmake --build cmake-build-release -j"$(nproc)" && \
+    cp cmake-build-release/nr-gnb build/ && \
+    cp cmake-build-release/nr-ue build/ && \
+    cp cmake-build-release/nr-cli build/
+
+WORKDIR /opt/UERANSIM
+
+CMD ["/bin/bash"]

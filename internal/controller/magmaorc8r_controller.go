@@ -76,7 +76,7 @@ func (r *MagmaOrc8rReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	chartPath := orc8r.Spec.ChartPath
 	if chartPath == "" {
-		chartPath = "magma-fullstack-upstream"
+		chartPath = magmaOrc8rChartName
 	}
 	if !orc8r.DeletionTimestamp.IsZero() {
 		return r.reconcileOrc8rDeletion(ctx, &orc8r, releaseName)

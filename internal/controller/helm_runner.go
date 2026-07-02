@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	defaultChartRepo = "https://github.com/infinitydon/telco-helm-charts.git"
-	defaultRevision  = "main"
-	stringTrue       = "true"
-	stringFalse      = "false"
+	defaultBundledChartsDir = "/opt/magma-operator/charts"
+	defaultRevision         = "main"
+	stringTrue              = "true"
+	stringFalse             = "false"
 )
 
 type helmRelease struct {
@@ -37,9 +37,6 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	if release.Namespace == "" {
 		return fmt.Errorf("release namespace is required")
 	}
-	if release.Repo == "" {
-		release.Repo = defaultChartRepo
-	}
 	if release.Revision == "" {
 		release.Revision = defaultRevision
 	}
@@ -47,12 +44,10 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 	runCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
 
-	repoDir := chartRepoDir(release)
-	if err := syncChartRepo(runCtx, release.Repo, release.Revision, repoDir); err != nil {
+	chartDir, err := resolveChartDir(runCtx, release)
+	if err != nil {
 		return err
 	}
-
-	chartDir := filepath.Join(repoDir, release.ChartPath)
 	args := []string{
 		"upgrade", "--install", release.ReleaseName, chartDir,
 		"--namespace", release.Namespace,
@@ -75,6 +70,33 @@ func reconcileHelmRelease(ctx context.Context, release helmRelease) error {
 		return fmt.Errorf("helm upgrade failed: %w: %s", err, out)
 	}
 	return nil
+}
+
+func resolveChartDir(ctx context.Context, release helmRelease) (string, error) {
+	if release.Repo != "" {
+		repoDir := chartRepoDir(release)
+		if err := syncChartRepo(ctx, release.Repo, release.Revision, repoDir); err != nil {
+			return "", err
+		}
+		return filepath.Join(repoDir, release.ChartPath), nil
+	}
+
+	for _, root := range bundledChartRoots() {
+		chartDir := filepath.Join(root, release.ChartPath)
+		if _, err := os.Stat(filepath.Join(chartDir, "Chart.yaml")); err == nil {
+			return chartDir, nil
+		}
+	}
+	return "", fmt.Errorf("bundled chart %q was not found; set spec.chartRepository only when using an explicit external chart source", release.ChartPath)
+}
+
+func bundledChartRoots() []string {
+	roots := []string{}
+	if envRoot := os.Getenv("MAGMA_OPERATOR_CHARTS_DIR"); envRoot != "" {
+		roots = append(roots, envRoot)
+	}
+	roots = append(roots, defaultBundledChartsDir, "charts")
+	return roots
 }
 
 func uninstallHelmRelease(ctx context.Context, releaseName, namespace string) error {

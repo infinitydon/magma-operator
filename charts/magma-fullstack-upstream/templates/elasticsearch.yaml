@@ -1,0 +1,91 @@
+{{- if .Values.observability.elasticsearch.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.observability.elasticsearch.name }}
+  labels:
+    app.kubernetes.io/name: elasticsearch
+    app.kubernetes.io/part-of: magma-fullstack-upstream
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: elasticsearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9300
+      targetPort: 9300
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.observability.elasticsearch.name }}
+  labels:
+    app.kubernetes.io/name: elasticsearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: magma-fullstack-upstream
+spec:
+  replicas: {{ .Values.observability.elasticsearch.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: elasticsearch
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: elasticsearch
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: elasticsearch
+          image: {{ .Values.image.elasticsearch }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9200
+            - name: transport
+              containerPort: 9300
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms256m -Xmx256m"
+          resources:
+{{ toYaml .Values.observability.elasticsearch.resources | indent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+      volumes:
+        - name: data
+        {{- if .Values.observability.elasticsearch.storage.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.observability.elasticsearch.name }}
+        {{- else }}
+          emptyDir: {}
+        {{- end }}
+{{- if .Values.observability.elasticsearch.storage.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.observability.elasticsearch.name }}
+  labels:
+    app.kubernetes.io/name: elasticsearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: magma-fullstack-upstream
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.observability.elasticsearch.storage.size }}
+  {{- with .Values.observability.elasticsearch.storage.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

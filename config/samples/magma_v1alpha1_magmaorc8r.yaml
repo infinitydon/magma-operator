@@ -8,8 +8,6 @@ metadata:
   namespace: magma
 spec:
   releaseName: magma-fullstack
-  chartRepository: https://github.com/infinitydon/telco-helm-charts.git
-  chartRevision: main
   chartPath: magma-fullstack-upstream
   domainName: magma.local
   controllerHostname: controller.magma.local

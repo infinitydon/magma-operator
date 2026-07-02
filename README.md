@@ -1,20 +1,20 @@
 # Magma Operator
 
-Kubebuilder operator for managing the Magma upstream Orc8r/NMS and AGW Helm charts from `infinitydon/telco-helm-charts`.
+Kubebuilder operator for managing Magma upstream Orc8r/NMS and AGW deployments with operator-bundled chart assets.
 
 The operator reconciles:
 
 - `MagmaOrc8r`: deploys Orc8r, NMS/MagmaLTE, PostgreSQL, bootstrap/admin jobs, and generated secrets through `magma-fullstack-upstream`.
 - `MagmaAGW`: deploys containerized AGW, idempotent node preparation, Multus/UERANSIM simulator resources, and AGW node anti-affinity through `magma-agw-upstream`.
 
-The current controller intentionally shells out to pinned Helm v3 inside the manager image. The manager image includes `helm`, `git`, and a writable `/tmp` cache for chart clones.
+The manager image includes pinned Helm v3 and the Magma chart assets under `/opt/magma-operator/charts`, so normal reconciliation does not clone or fetch charts from an external repository. `spec.chartRepository` remains available only as an explicit override for development or controlled migration work.
 
 ## Image
 
 Default image:
 
 ```bash
-ghcr.io/infinitydon/magma-operator:v0.1.23
+ghcr.io/infinitydon/magma-operator:v0.1.25
 ```
 
 No default container image uses the `latest` tag.
@@ -23,8 +23,8 @@ Build without Docker:
 
 ```bash
 make build
-make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.23
-buildah push ghcr.io/infinitydon/magma-operator:v0.1.23
+make docker-build CONTAINER_TOOL=buildah IMG=ghcr.io/infinitydon/magma-operator:v0.1.25
+buildah push ghcr.io/infinitydon/magma-operator:v0.1.25
 ```
 
 ## Install

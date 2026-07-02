@@ -1,0 +1,19 @@
+{{- if .Values.gatewayIdentity.snowflake }}
+{{/*
+Copyright 2026 The Magma Authors.
+
+This source code is licensed under the BSD-style license found in the
+LICENSE file in the root directory of the source tree.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: agw-identity
+  name: agw-identity
+  namespace: {{ .Values.namespace }}
+data:
+  snowflake: |
+    {{ include "agw.snowflake" . }}
+{{- end }}

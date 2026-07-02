@@ -1,0 +1,20 @@
+{{- if .Values.simulator.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ueransim-gnb
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: ueransim-gnb
+{{ include "default-labels" . | indent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/component: ueransim-gnb
+{{ include "default-selector-labels" . | indent 4 }}
+  ports:
+    - name: radio
+      port: 4997
+      targetPort: radio
+      protocol: UDP
+{{- end }}

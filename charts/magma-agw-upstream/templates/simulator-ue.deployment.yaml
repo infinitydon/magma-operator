@@ -1,0 +1,59 @@
+{{- if .Values.simulator.enabled }}
+{{ include "magma-agw-upstream.assertNoLatest" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ueransim-ue
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: ueransim-ue
+{{ include "default-labels" . | indent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ueransim-ue
+{{ include "default-selector-labels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: ueransim-ue
+{{ include "default-selector-labels" . | indent 8 }}
+      annotations:
+        checksum/simulator-values: {{ toJson .Values.simulator | sha256sum }}
+    spec:
+      {{- include "simulator.agwAntiAffinity" . | nindent 6 }}
+      {{- with (default .Values.nodeSelector .Values.simulator.nodeSelector) }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+        - name: ue
+          image: {{ printf "%s:%s" .Values.simulator.image.repository .Values.simulator.image.tag | quote }}
+          imagePullPolicy: {{ .Values.simulator.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -ceu
+            - |
+              sleep {{ .Values.simulator.ue.startDelaySeconds | int }}
+              exec {{ .Values.simulator.ue.commandPath | quote }} -c /config/ue.yaml
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+          volumeMounts:
+            - name: sim-config
+              mountPath: /config
+          resources:
+{{ toYaml .Values.simulator.resources | indent 12 }}
+      volumes:
+        - name: sim-config
+          configMap:
+            name: {{ .Release.Name }}-ueransim-config
+{{- end }}

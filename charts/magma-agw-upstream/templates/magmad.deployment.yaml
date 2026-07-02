@@ -1,0 +1,99 @@
+{{/*
+# Copyright 2020 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+*/}}
+---
+{{ include "agwc.deployment" (list . "magmad.deployment") -}}
+{{- define "magmad.deployment" -}}
+metadata:
+  labels:
+    app.kubernetes.io/component: magmad
+  name: magmad
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: magmad
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: magmad
+    spec:
+      volumes:
+        - name: magma-config
+          configMap:
+            name: gateway-config
+        - name: controlproxy-config
+          configMap:
+            name: controlproxy-config
+        - name: agwc-claim
+          persistentVolumeClaim:
+            claimName: agwc-claim
+        - name: snowflake-file
+          {{- if .Values.gatewayIdentity.snowflake }}
+          configMap:
+            name: agw-identity
+          {{- else }}
+          hostPath:
+            path: /etc/snowflake
+            type: FileOrCreate
+          {{- end }}
+        - name: profile-file
+          hostPath:
+            path: /etc/profile
+            type: FileOrCreate
+        - name: systemctl-shim
+          configMap:
+            name: magmad-systemctl-shim
+            defaultMode: 0755
+      containers:
+      -
+{{ include "agwc.container" (list . "magmad.container")}}
+{{- end -}}
+{{- define "magmad.container" -}}
+name: magmad
+args:
+  - /usr/bin/env
+  - python3
+  - -m
+  - magma.magmad.main
+image: "{{ .Values.image.repository }}/agw_gateway_python{{ .Values.image.arch}}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+volumeMounts:
+  - name: magma-config
+    mountPath: /etc/magma/magmad.yml
+    subPath: magmad.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/service_registry.yml
+    subPath: service_registry.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/gateway.mconfig
+    subPath: gateway.mconfig
+    readOnly: true
+  - name: controlproxy-config
+    mountPath: /etc/magma/control_proxy.yml
+    subPath: control_proxy.yml
+    readOnly: true
+  - mountPath: /var/opt/magma
+    name: agwc-claim
+  - mountPath: /etc/snowflake
+    name: snowflake-file
+    {{- if .Values.gatewayIdentity.snowflake }}
+    subPath: snowflake
+    readOnly: true
+    {{- end }}
+  - mountPath: /etc/profile
+    name: profile-file
+  - name: systemctl-shim
+    mountPath: /usr/local/bin/systemctl
+    subPath: systemctl
+    readOnly: true
+{{- end -}}

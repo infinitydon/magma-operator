@@ -1,0 +1,93 @@
+{{- if .Values.simulator.enabled }}
+{{ include "magma-agw-upstream.assertNoLatest" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ueransim-gnb
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: ueransim-gnb
+{{ include "default-labels" . | indent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: ueransim-gnb
+{{ include "default-selector-labels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: ueransim-gnb
+{{ include "default-selector-labels" . | indent 8 }}
+      annotations:
+        checksum/simulator-values: {{ toJson .Values.simulator | sha256sum }}
+      {{- if .Values.simulator.multus.enabled }}
+        k8s.v1.cni.cncf.io/networks: |
+          [
+            {"name": "{{ .Values.simulator.multus.n2.name }}", "namespace": "{{ .Values.namespace }}", "interface": "{{ .Values.simulator.multus.n2.interface }}", "ips": ["{{ .Values.simulator.multus.n2.ip }}"]},
+            {"name": "{{ .Values.simulator.multus.n3.name }}", "namespace": "{{ .Values.namespace }}", "interface": "{{ .Values.simulator.multus.n3.interface }}", "ips": ["{{ .Values.simulator.multus.n3.ip }}"]}
+          ]
+      {{- end }}
+    spec:
+      {{- include "simulator.agwAntiAffinity" . | nindent 6 }}
+      {{- with (default .Values.nodeSelector .Values.simulator.nodeSelector) }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      initContainers:
+        - name: config-gen
+          image: {{ printf "%s:%s" .Values.simulator.initImage.repository .Values.simulator.initImage.tag | quote }}
+          imagePullPolicy: {{ .Values.simulator.initImage.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ceu
+            - |
+              apk add --no-cache iproute2
+              /scripts/init-gnb.sh
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: sim-config
+              mountPath: /scripts
+      containers:
+        - name: gnb
+          image: {{ printf "%s:%s" .Values.simulator.image.repository .Values.simulator.image.tag | quote }}
+          imagePullPolicy: {{ .Values.simulator.image.pullPolicy }}
+          command:
+            - /bin/bash
+            - -ceu
+            - |
+              sleep {{ .Values.simulator.gnb.startDelaySeconds | int }}
+              exec {{ .Values.simulator.gnb.commandPath | quote }} -c /config/gnb.yaml
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - NET_ADMIN
+          ports:
+            - name: radio
+              containerPort: 4997
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          resources:
+{{ toYaml .Values.simulator.resources | indent 12 }}
+      volumes:
+        - name: config
+          emptyDir: {}
+        - name: sim-config
+          configMap:
+            name: {{ .Release.Name }}-ueransim-config
+            defaultMode: 0755
+{{- end }}

@@ -28,10 +28,16 @@ import (
 type MagmaAGWSpec struct {
 	// +optional
 	ReleaseName string `json:"releaseName,omitempty"`
+	// ChartRepository is an explicit external chart source override. When empty,
+	// the operator uses the chart bundled in the manager image.
 	// +optional
 	ChartRepository string `json:"chartRepository,omitempty"`
+	// ChartRevision selects the external chartRepository revision. It is ignored
+	// when ChartRepository is empty and the bundled chart is used.
 	// +optional
 	ChartRevision string `json:"chartRevision,omitempty"`
+	// ChartPath selects the bundled or external chart directory. Defaults to the
+	// bundled AGW chart.
 	// +optional
 	ChartPath string `json:"chartPath,omitempty"`
 	// +optional

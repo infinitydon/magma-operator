@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: agwc-preflight
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: agwc-preflight
+{{ include "default-labels" . | indent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: preflight
+      image: {{ .Values.image.test | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          test "{{ .Values.image.tag }}" != "latest"
+          test "{{ .Values.image.gatewayGoTag }}" != "latest"
+          echo "magma-agw-upstream values are pinned"

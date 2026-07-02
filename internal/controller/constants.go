@@ -8,6 +8,7 @@ const (
 
 	managedByMagmaOperator = "magma-operator"
 	magmaAGWChartName      = "magma-agw-upstream"
+	magmaOrc8rChartName    = "magma-fullstack-upstream"
 	magmalteDeploymentName = "nms-magmalte"
 
 	shellExitOnErrorCommand = "-ceu"

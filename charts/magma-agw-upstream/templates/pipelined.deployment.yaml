@@ -1,0 +1,279 @@
+{{/*
+# Copyright 2020 The Magma Authors.
+
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+*/}}
+---
+{{ include "agwc.deployment" (list . "pipelined.deployment") -}}
+{{- define "pipelined.deployment" -}}
+metadata:
+  labels:
+    app.kubernetes.io/component: pipelined
+  name: pipelined
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: pipelined
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: pipelined
+    spec:
+      volumes:
+        - name: magma-config
+          configMap:
+            name: gateway-config
+        - name: controlproxy-config
+          configMap:
+            name: controlproxy-config
+        - name: agwc-claim
+          persistentVolumeClaim:
+            claimName: agwc-claim
+        - name: tmp-volume
+          hostPath:
+            path: /tmp
+            type: Directory
+        - name: ovs-volume
+          hostPath:
+            path: /var/run
+            type: Directory
+      {{- if .Values.startup.pipelined.waitForSessiond.enabled }}
+      initContainers:
+        - name: wait-for-sessiond
+          image: "{{ .Values.image.repository }}/agw_gateway_python{{ .Values.image.arch}}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ceu
+            - |
+              python3 - <<'PY'
+              import os
+              import socket
+              import sys
+              import time
+
+              host = os.environ["SESSIOND_HOST"]
+              port = int(os.environ["SESSIOND_PORT"])
+              deadline = time.time() + int(os.environ["WAIT_TIMEOUT_SECONDS"])
+
+              while time.time() < deadline:
+                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                  sock.settimeout(2)
+                  try:
+                      sock.connect((host, port))
+                      print("sessiond is reachable at {}:{}".format(host, port), flush=True)
+                      sys.exit(0)
+                  except OSError as exc:
+                      print("waiting for sessiond at {}:{}: {}".format(host, port, exc), flush=True)
+                      time.sleep(2)
+                  finally:
+                      sock.close()
+
+              raise SystemExit("timed out waiting for sessiond at {}:{}".format(host, port))
+              PY
+          env:
+            - name: SESSIOND_HOST
+              value: {{ .Values.startup.pipelined.waitForSessiond.host | quote }}
+            - name: SESSIOND_PORT
+              value: {{ .Values.startup.pipelined.waitForSessiond.port | quote }}
+            - name: WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.startup.pipelined.waitForSessiond.timeoutSeconds | quote }}
+      {{- end }}
+      containers:
+      -
+{{ include "agwc.container" (list . "pipelined.container")}}
+      {{- if .Values.startup.pipelined.qfiClassifierFallback.enabled }}
+      {{- $qfiFallback := .Values.startup.pipelined.qfiClassifierFallback }}
+      {{- $upfAssociation := default dict $qfiFallback.upfAssociation }}
+      {{- $sessionPass := default dict $qfiFallback.sessionPass }}
+      - name: qfi-classifier-fallback
+        image: "{{ .Values.image.repository }}/agw_gateway_python{{ .Values.image.arch}}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+        command:
+          - /bin/bash
+          - -ceu
+          - |
+            bridge={{ .Values.startup.pipelined.qfiClassifierFallback.bridge | quote }}
+            qfi_priority={{ .Values.startup.pipelined.qfiClassifierFallback.qfiPriority | quote }}
+            fallback_priority={{ .Values.startup.pipelined.qfiClassifierFallback.fallbackPriority | quote }}
+            gtp_port={{ .Values.startup.pipelined.qfiClassifierFallback.gtpPort | quote }}
+            interval={{ .Values.startup.pipelined.qfiClassifierFallback.intervalSeconds | quote }}
+            upf_assoc_enabled={{ default true $upfAssociation.enabled | quote }}
+            upf_sessiond_target={{ default "127.0.0.1:50065" $upfAssociation.sessiondTarget | quote }}
+            upf_node_id={{ default "192.168.60.142" $upfAssociation.nodeId | quote }}
+            upf_n3_address={{ default "192.168.60.142" $upfAssociation.n3Address | quote }}
+            session_pass_enabled={{ default true $sessionPass.enabled | quote }}
+            session_pass_priority={{ default 100 $sessionPass.priority | quote }}
+
+            log() { printf '[qfi-classifier-fallback] %s\n' "$*"; }
+
+            ensure_upf_association() {
+              [ "${upf_assoc_enabled}" = "true" ] || return 0
+              SESSIOND_TARGET="${upf_sessiond_target}" \
+              UPF_NODE_ID="${upf_node_id}" \
+              UPF_N3_ADDRESS="${upf_n3_address}" \
+              python3 - <<'PY'
+            import os
+            import grpc
+            from google.protobuf.timestamp_pb2 import Timestamp
+            from lte.protos.session_manager_pb2 import (
+                UPFAssociationState,
+                UPFFeatureSet,
+                UPFNodeState,
+                UserPlaneIPResourceSchema,
+            )
+            from lte.protos.session_manager_pb2_grpc import SetInterfaceForUserPlaneStub
+
+            target = os.environ["SESSIOND_TARGET"]
+            node_id = os.environ["UPF_NODE_ID"]
+            n3_address = os.environ["UPF_N3_ADDRESS"]
+            timestamp = Timestamp()
+            timestamp.GetCurrentTime()
+
+            msg = UPFNodeState(upf_id=node_id)
+            msg.associaton_state.CopyFrom(UPFAssociationState(
+                state_version=1,
+                assoc_state=UPFAssociationState.ESTABLISHED,
+                feature_set=UPFFeatureSet(f_teid=True),
+                recovery_time_stamp=timestamp,
+                ip_resource_schema=[
+                    UserPlaneIPResourceSchema(
+                        ipv4_address=n3_address,
+                        teid_range_indication=0,
+                        teid_range=0,
+                    ),
+                ],
+            ))
+            SetInterfaceForUserPlaneStub(grpc.insecure_channel(target)).SetUPFNodeState(msg, timeout=5)
+            print("ensured UPF association {} via {}".format(node_id, target), flush=True)
+            PY
+            }
+
+            ensure_session_pass_flows() {
+              [ "${session_pass_enabled}" = "true" ] || return 0
+              /usr/bin/ovs-ofctl -O OpenFlow13 dump-flows "${bridge}" table=0 2>/dev/null |
+                awk -F'nw_dst=' '
+                  /priority=65503/ && /in_port=LOCAL/ && /nw_dst=192[.]168[.]128[.]/ {
+                    split($2, parts, " ")
+                    split(parts[1], ip_parts, ",")
+                    print ip_parts[1]
+                  }' |
+                sort -u |
+                while IFS= read -r ue_ip; do
+                  [ -n "${ue_ip}" ] || continue
+                  /usr/bin/ovs-ofctl -O OpenFlow13 add-flow "${bridge}" "table=11,priority=${session_pass_priority},ip,reg1=0x1,nw_src=${ue_ip} actions=resubmit(,12)"
+                  /usr/bin/ovs-ofctl -O OpenFlow13 add-flow "${bridge}" "table=11,priority=${session_pass_priority},ip,reg1=0x10,nw_dst=${ue_ip} actions=resubmit(,12)"
+                  /usr/bin/ovs-ofctl -O OpenFlow13 --strict del-flows "${bridge}" "table=13,priority=${session_pass_priority},ip,reg1=0x1,nw_src=${ue_ip}" 2>/dev/null || true
+                  /usr/bin/ovs-ofctl -O OpenFlow13 --strict del-flows "${bridge}" "table=13,priority=${session_pass_priority},ip,reg1=0x10,nw_dst=${ue_ip}" 2>/dev/null || true
+                  /usr/bin/ovs-ofctl -O OpenFlow13 --strict del-flows "${bridge}" "table=14,priority=${session_pass_priority},ip,reg1=0x1,nw_src=${ue_ip}" 2>/dev/null || true
+                  /usr/bin/ovs-ofctl -O OpenFlow13 --strict del-flows "${bridge}" "table=14,priority=${session_pass_priority},ip,reg1=0x10,nw_dst=${ue_ip}" 2>/dev/null || true
+                  log "ensured table 11 session pass flows for ${ue_ip}"
+                done
+            }
+
+            while true; do
+              if ! /usr/bin/ovs-vsctl br-exists "${bridge}" >/dev/null 2>&1; then
+                log "bridge ${bridge} is not ready"
+                sleep "${interval}"
+                continue
+              fi
+
+              ensure_upf_association || log "failed to ensure UPF association"
+
+              /usr/bin/ovs-ofctl -O OpenFlow13 dump-flows "${bridge}" table=0 2>/dev/null |
+                awk -v qfi_priority="${qfi_priority}" \
+                    -v fallback_priority="${fallback_priority}" \
+                    -v gtp_port="${gtp_port}" '
+                  $0 ~ ("priority=" qfi_priority) &&
+                  $0 ~ ("in_port=" gtp_port) &&
+                  $0 ~ /tun_id=/ &&
+                  $0 ~ /qfi=/ &&
+                  $0 ~ /actions=/ {
+                    line=$0
+                    sub(/^.* table=0, /, "", line)
+                    split(line, parts, " actions=")
+                    match_part=parts[1]
+                    actions=parts[2]
+                    sub(/^n_packets=[0-9]+, n_bytes=[0-9]+, /, "", match_part)
+                    sub("priority=" qfi_priority, "priority=" fallback_priority, match_part)
+                    gsub(/,qfi=[0-9]+/, "", match_part)
+                    print match_part " actions=" actions
+                  }' |
+                while IFS= read -r flow; do
+                  [ -n "${flow}" ] || continue
+                  if /usr/bin/ovs-ofctl -O OpenFlow13 add-flow "${bridge}" "${flow}"; then
+                    log "ensured ${flow%% actions=*}"
+                  else
+                    log "failed to install ${flow%% actions=*}"
+                  fi
+                done
+
+              ensure_session_pass_flows || log "failed to ensure session pass flows"
+
+              sleep "${interval}"
+            done
+        volumeMounts:
+          - mountPath: /var/run
+            name: ovs-volume
+      {{- end }}
+{{- end -}}
+{{- define "pipelined.container" -}}
+name: pipelined
+args:
+  - /bin/bash
+  - -c
+  - /usr/bin/ovs-vsctl --all destroy Flow_Sample_Collector_Set &&
+    /usr/bin/ovs-vsctl set bridge gtp_br0 protocols={{ .Values.nodePrep.bridge.protocols | quote }} other-config:disable-in-band=true &&
+    /usr/sbin/ip link set gtp_br0 up &&
+    /usr/bin/ovs-vsctl set-controller gtp_br0 tcp:127.0.0.1:6633 tcp:127.0.0.1:6654 &&
+    /usr/bin/ovs-vsctl set-fail-mode gtp_br0 secure &&
+    /usr/bin/ovs-vsctl set-manager ptcp:6640 &&
+    /usr/bin/env python3 -m magma.pipelined.main
+image: "{{ .Values.image.repository }}/agw_gateway_python{{ .Values.image.arch}}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+securityContext:
+  privileged: true
+  capabilities:
+    add:
+      - NET_ADMIN
+      - NET_RAW
+volumeMounts:
+  - name: magma-config
+    mountPath: /etc/magma/magmad.yml
+    subPath: magmad.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/service_registry.yml
+    subPath: service_registry.yml
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/gateway.mconfig
+    subPath: gateway.mconfig
+    readOnly: true
+  - name: magma-config
+    mountPath: /etc/magma/pipelined.yml_prod
+    subPath: pipelined.yml
+    readOnly: true
+  - name: controlproxy-config
+    mountPath: /etc/magma/control_proxy.yml
+    subPath: control_proxy.yml
+    readOnly: true
+  - mountPath: /var/opt/magma
+    name: agwc-claim
+  - mountPath: /tmp
+    name: tmp-volume
+  - mountPath: /var/run
+    name: ovs-volume
+{{- end -}}

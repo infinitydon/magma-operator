@@ -1,0 +1,45 @@
+{{/*
+Copyright 2026.
+
+This chart packages upstream Magma gateway config files so containerized AGW
+services can start without requiring host-preinstalled /etc/magma content.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: gateway-config
+  name: gateway-config
+  namespace: {{ .Values.namespace }}
+data:
+  magmad.yml: |
+{{ .Files.Get "files/configs/magmad.yml" | indent 4 }}
+  service_registry.yml: |
+{{ .Files.Get "files/configs/service_registry.yml" | indent 4 }}
+  gateway.mconfig: |
+{{ .Files.Get "files/configs/gateway.mconfig" | indent 4 }}
+  connectiond.yml: |
+{{ .Files.Get "files/configs/connectiond.yml" | indent 4 }}
+  dnsd.yml: |
+{{ .Files.Get "files/configs/dnsd.yml" | indent 4 }}
+  enodebd.yml: |
+{{ .Files.Get "files/configs/enodebd.yml" | indent 4 }}
+  health.yml: |
+{{ .Files.Get "files/configs/health.yml" | indent 4 }}
+  liagentd.yml: |
+{{ .Files.Get "files/configs/liagentd.yml" | indent 4 }}
+  mme.yml: |
+{{ .Files.Get "files/configs/mme.yml" | indent 4 }}
+  monitord.yml: |
+{{ .Files.Get "files/configs/monitord.yml" | indent 4 }}
+  pipelined.yml: |
+{{ .Files.Get "files/configs/pipelined.yml" | indent 4 }}
+  redis.yml: |
+{{ .Files.Get "files/configs/redis.yml" | indent 4 }}
+  redirectd.yml: |
+{{ .Files.Get "files/configs/redirectd.yml" | indent 4 }}
+  spgw.yml: |
+{{ .Files.Get "files/configs/spgw.yml" | indent 4 }}
+  subscriberdb.yml: |
+{{ .Files.Get "files/configs/subscriberdb.yml" | indent 4 }}

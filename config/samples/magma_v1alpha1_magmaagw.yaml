@@ -8,8 +8,6 @@ metadata:
   namespace: magma-agw
 spec:
   releaseName: agwc
-  chartRepository: https://github.com/infinitydon/telco-helm-charts.git
-  chartRevision: main
   chartPath: magma-agw-upstream
   networkID: mpk_test
   orc8rNamespace: magma

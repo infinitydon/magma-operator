@@ -1,0 +1,33 @@
+{{- if and .Values.simulator.enabled .Values.simulator.multus.enabled }}
+{{ include "magma-agw-upstream.assertNoLatest" . }}
+{{- $sim := .Values.simulator }}
+{{- range $key, $net := dict "n2" $sim.multus.n2 "n3" $sim.multus.n3 }}
+---
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: {{ $net.name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    app.kubernetes.io/component: ueransim
+{{ include "default-labels" $ | indent 4 }}
+spec:
+  config: |-
+    {
+      "cniVersion": "0.3.1",
+      "type": "{{ $sim.multus.type }}",
+      {{- if eq $sim.multus.type "host-device" }}
+      "device": "{{ $net.master }}",
+      {{- else }}
+      "master": "{{ $net.master }}",
+      "mode": "{{ $sim.multus.mode }}",
+      {{- end }}
+      "ipam": {
+        "type": "static"
+        {{- if $net.gateway }},
+        "gateway": "{{ $net.gateway }}"
+        {{- end }}
+      }
+    }
+{{- end }}
+{{- end }}

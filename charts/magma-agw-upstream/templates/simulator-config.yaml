@@ -1,0 +1,95 @@
+{{- if .Values.simulator.enabled }}
+{{ include "magma-agw-upstream.assertNoLatest" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-ueransim-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/component: ueransim
+{{ include "default-labels" . | indent 4 }}
+data:
+  init-gnb.sh: |
+    #!/bin/sh
+    set -eu
+    n2_if="{{ .Values.simulator.multus.n2.interface }}"
+    n3_if="{{ .Values.simulator.multus.n3.interface }}"
+    n2_ip="$(ip -4 addr show "${n2_if}" | awk '/inet / {print $2}' | cut -d/ -f1 | head -1)"
+    n3_ip="$(ip -4 addr show "${n3_if}" | awk '/inet / {print $2}' | cut -d/ -f1 | head -1)"
+    if [ -z "${n2_ip}" ] || [ -z "${n3_ip}" ]; then
+      echo "Could not determine UERANSIM N2/N3 IPs" >&2
+      ip addr
+      exit 1
+    fi
+    cat >/config/gnb.yaml <<EOF
+    mcc: '{{ .Values.simulator.ue.mcc }}'
+    mnc: '{{ .Values.simulator.ue.mnc }}'
+    nci: '{{ .Values.simulator.gnb.nci }}'
+    idLength: {{ .Values.simulator.gnb.idLength }}
+    tac: {{ .Values.simulator.gnb.tac }}
+    linkIp: '0.0.0.0'
+    ngapIp: '${n2_ip}'
+    gtpIp: '${n3_ip}'
+    amfConfigs:
+      - address: '{{ .Values.simulator.gnb.amfAddress }}'
+        port: 38412
+    slices:
+      - sst: {{ .Values.simulator.gnb.slices.sst }}
+        {{- if .Values.simulator.gnb.slices.sd }}
+        sd: {{ .Values.simulator.gnb.slices.sd }}
+        {{- end }}
+    ignoreStreamIds: true
+    EOF
+  ue.yaml: |
+    supi: '{{ .Values.simulator.ue.supi }}'
+    mcc: '{{ .Values.simulator.ue.mcc }}'
+    mnc: '{{ .Values.simulator.ue.mnc }}'
+    key: '{{ .Values.simulator.ue.key }}'
+    op: '{{ .Values.simulator.ue.opc }}'
+    opType: 'OPC'
+    amf: '{{ .Values.simulator.ue.amf }}'
+    imei: '{{ .Values.simulator.ue.imei }}'
+    imeiSv: '{{ .Values.simulator.ue.imeiSv }}'
+    gnbSearchList:
+      - {{ .Release.Name }}-ueransim-gnb
+    uacAic:
+      mps: false
+      mcs: false
+    uacAcc:
+      normalClass: 0
+      class11: false
+      class12: false
+      class13: false
+      class14: false
+      class15: false
+    sessions:
+      - type: 'IPv4'
+        apn: '{{ .Values.simulator.ue.apn }}'
+        slice:
+          sst: {{ .Values.simulator.gnb.slices.sst }}
+          {{- if .Values.simulator.gnb.slices.sd }}
+          sd: {{ .Values.simulator.gnb.slices.sd }}
+          {{- end }}
+    configured-nssai:
+      - sst: {{ .Values.simulator.gnb.slices.sst }}
+        {{- if .Values.simulator.gnb.slices.sd }}
+        sd: {{ .Values.simulator.gnb.slices.sd }}
+        {{- end }}
+    default-nssai:
+      - sst: {{ .Values.simulator.gnb.slices.sst }}
+        {{- if .Values.simulator.gnb.slices.sd }}
+        sd: {{ .Values.simulator.gnb.slices.sd }}
+        {{- end }}
+    integrity:
+      IA1: true
+      IA2: true
+      IA3: true
+    ciphering:
+      EA1: true
+      EA2: true
+      EA3: true
+    integrityMaxRate:
+      uplink: 'full'
+      downlink: 'full'
+{{- end }}
